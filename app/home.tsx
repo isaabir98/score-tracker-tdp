@@ -9,54 +9,50 @@ import {
 } from "react-native";
 import axios from "axios";
 
-// Define the types for the API response
 interface Team {
-  name: string;
+  id?: number;
+  name?: string;
   logo?: string;
-}
-
-interface Fixture {
-  id: number;
-  date: string;
-  status: {
-    long: string;
-    short: string;
-  };
-  timezone: string;
-  referee: string | null;
-  venue: {
-    name: string;
-    city: string;
-  };
-  league: {
-    name: string;
-    logo?: string;
-    country: string;
-    flag?: string;
-  };
-  goals: {
-    home: number | null;
-    away: number | null;
-  };
+  winner?: boolean | null;
 }
 
 interface Match {
-  fixture: Fixture;
-  teams: {
-    home: Team;
-    away: Team;
+  fixture?: {
+    id?: number;
+    date?: string;
+    status?: {
+      long?: string;
+      short?: string;
+    };
+    goals?: {
+      home?: number | null;
+      away?: number | null;
+    };
+  };
+  teams?: {
+    home?: Team;
+    away?: Team;
+  };
+  league?: {
+    name?: string;
+    country?: string;
+    logo?: string;
   };
 }
 
 const SoccerFixturesScreen = () => {
   const [fixtures, setFixtures] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchFixtures = async () => {
+    const fetchData = async () => {
       try {
+        // Simulate 3 second delay for API response
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
         const response = await axios.get(
-          "https://v3.football.api-sports.io/fixtures?date=2025-04-13",
+          "https://v3.football.api-sports.io/fixtures?date=2025-04-21",
           {
             headers: {
               "x-rapidapi-key": "1d65b111377ba2e919cdbc2e0c31b738",
@@ -64,92 +60,141 @@ const SoccerFixturesScreen = () => {
             },
           },
         );
+
+        if (!response.data?.response) {
+          throw new Error("Invalid API response structure");
+        }
+
         setFixtures(response.data.response);
-      } catch (error) {
-        console.error("Error fetching live fixtures:", error);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error occurred");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchFixtures();
+    fetchData();
   }, []);
 
-  const renderItem = ({ item }: { item: Match }) => (
-    <View style={styles.fixtureItem}>
-      {/* League Logo */}
-      {item.fixture.league.logo ? (
-        <Image
-          source={{ uri: item.fixture.league.logo }}
-          style={styles.leagueLogo}
-        />
-      ) : (
-        <Text>No League Logo</Text>
-      )}
+  const renderItem = ({ item }: { item: Match }) => {
+    const fixture = item.fixture || {};
+    const league = item.league || {};
+    const teams = item.teams || {};
+    const homeTeam = teams.home || {};
+    const awayTeam = teams.away || {};
+    const goals = fixture.goals || {};
 
-      <Text style={styles.fixtureTitle}>
-        {item.teams.home.name} vs {item.teams.away.name}
-      </Text>
+    const homeGoals = goals.home;
+    const awayGoals = goals.away;
 
-      {/* Country Flag */}
-      {item.fixture.league.flag ? (
-        <Image
-          source={{ uri: item.fixture.league.flag }}
-          style={styles.countryFlag}
-        />
-      ) : (
-        <Text>No Country Flag</Text>
-      )}
+    return (
+      <View style={styles.matchContainer}>
+        {/* League Info */}
+        {league.logo && (
+          <View style={styles.leagueInfo}>
+            <Image
+              source={{ uri: league.logo }}
+              style={styles.leagueLogo}
+              resizeMode="contain"
+            />
+            <Text style={styles.leagueText}>
+              {league.name || "Unknown League"} •{" "}
+              {league.country || "Unknown Country"}
+            </Text>
+          </View>
+        )}
 
-      <Text style={styles.leagueName}>
-        {item.fixture.league.name} - {item.fixture.league.country}
-      </Text>
+        {/* Teams */}
+        <View style={styles.teamsContainer}>
+          {/* Home Team */}
+          <View style={styles.teamContainer}>
+            <Image
+              source={{
+                uri:
+                  homeTeam.logo ||
+                  "https://via.placeholder.com/60x60?text=HOME",
+              }}
+              style={styles.teamLogo}
+              resizeMode="contain"
+            />
+            <Text style={styles.teamName}>{homeTeam.name || "Home Team"}</Text>
+          </View>
 
-      {/* Match Date and Time */}
-      <Text style={styles.fixtureDate}>
-        Date: {new Date(item.fixture.date).toLocaleString()}
-      </Text>
+          {/* VS and Score */}
+          <View style={styles.scoreContainer}>
+            <Text style={styles.vsText}>VS</Text>
+            {homeGoals !== null &&
+              homeGoals !== undefined &&
+              awayGoals !== null &&
+              awayGoals !== undefined && (
+                <Text style={styles.scoreText}>
+                  {homeGoals} - {awayGoals}
+                </Text>
+              )}
+          </View>
 
-      {/* Referee */}
-      {item.fixture.referee ? (
-        <Text style={styles.fixtureReferee}>
-          Referee: {item.fixture.referee}
-        </Text>
-      ) : (
-        <Text>No Referee Info</Text>
-      )}
+          {/* Away Team */}
+          <View style={styles.teamContainer}>
+            <Image
+              source={{
+                uri:
+                  awayTeam.logo ||
+                  "https://via.placeholder.com/60x60?text=AWAY",
+              }}
+              style={styles.teamLogo}
+              resizeMode="contain"
+            />
+            <Text style={styles.teamName}>{awayTeam.name || "Away Team"}</Text>
+          </View>
+        </View>
 
-      {/* Match Status */}
-      <Text style={styles.fixtureStatus}>
-        Status: {item.fixture.status.long}
-      </Text>
+        {/* Match Details */}
+        <View style={styles.matchDetails}>
+          <Text style={styles.detailText}>
+            {fixture.date
+              ? new Date(fixture.date).toLocaleString()
+              : "Date not available"}
+          </Text>
+          <Text style={styles.detailText}>
+            Status: {fixture.status?.long || "Unknown"}
+          </Text>
+        </View>
+      </View>
+    );
+  };
 
-      {/* Match Goals */}
-      <Text style={styles.fixtureGoals}>
-        Score:{" "}
-        {item.fixture.goals.home !== null ? item.fixture.goals.home : "N/A"} -{" "}
-        {item.fixture.goals.away !== null ? item.fixture.goals.away : "N/A"}
-      </Text>
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" />
+        <Text style={styles.loadingText}>Loading matches...</Text>
+      </View>
+    );
+  }
 
-      {/* Venue Info */}
-      <Text style={styles.fixtureVenue}>
-        Venue: {item.fixture.venue.name}, {item.fixture.venue.city}
-      </Text>
-    </View>
-  );
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>Error: {error}</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Soccer Fixtures</Text>
-      {loading ? (
-        <ActivityIndicator size="large" color="#0000ff" />
-      ) : (
-        <FlatList
-          data={fixtures}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.fixture.id.toString()}
-        />
-      )}
+      <Text style={styles.header}>Today's Matches</Text>
+      <FlatList
+        data={fixtures}
+        renderItem={renderItem}
+        keyExtractor={(item, index) =>
+          item?.fixture?.id?.toString() || `match-${index}`
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No matches today</Text>
+          </View>
+        }
+      />
     </View>
   );
 };
@@ -157,64 +202,119 @@ const SoccerFixturesScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
     padding: 16,
+    backgroundColor: "#f0f2f5",
   },
   header: {
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 16,
+    fontSize: 26,
+    fontWeight: "700",
+    marginBottom: 20,
+    textAlign: "center",
+    color: "#1a1a1a",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#555",
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  errorText: {
+    color: "#d9534f",
+    fontSize: 16,
     textAlign: "center",
   },
-  fixtureItem: {
-    backgroundColor: "#fff",
+  matchContainer: {
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
-    borderRadius: 8,
+    marginBottom: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 4,
   },
-  fixtureTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-  fixtureDate: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  fixtureStatus: {
-    fontSize: 14,
-    color: "#007BFF",
-  },
-  fixtureGoals: {
-    fontSize: 16,
-    marginTop: 8,
-    fontWeight: "bold",
-  },
-  fixtureVenue: {
-    fontSize: 14,
-    marginTop: 8,
-    fontStyle: "italic",
-  },
-  leagueName: {
-    fontSize: 14,
-    marginTop: 8,
-    fontStyle: "italic",
+  leagueInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
   },
   leagueLogo: {
-    width: 50,
-    height: 50,
-    marginBottom: 8,
+    width: 24,
+    height: 24,
+    marginRight: 8,
   },
-  countryFlag: {
-    width: 30,
-    height: 20,
-    marginBottom: 8,
-  },
-  fixtureReferee: {
+  leagueText: {
     fontSize: 14,
-    marginTop: 8,
-    fontStyle: "italic",
+    fontWeight: "600",
+    color: "#444",
+  },
+  teamsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  teamContainer: {
+    alignItems: "center",
+    flex: 1,
+  },
+  teamLogo: {
+    width: 55,
+    height: 55,
+    marginBottom: 6,
+  },
+  teamName: {
+    fontSize: 13,
+    fontWeight: "500",
+    textAlign: "center",
+    color: "#333",
+  },
+  scoreContainer: {
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+  vsText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#888",
+  },
+  scoreText: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#1e88e5",
+    marginTop: 6,
+  },
+  matchDetails: {
+    borderTopWidth: 1,
+    borderTopColor: "#e0e0e0",
+    paddingTop: 10,
+    marginTop: 10,
+  },
+  detailText: {
+    fontSize: 13,
+    color: "#777",
+    marginBottom: 2,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: "#999",
   },
 });
 
