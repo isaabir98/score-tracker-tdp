@@ -22,7 +22,7 @@ const LoginScreen = () => {
       await signInWithEmailAndPassword(auth, email, password);
       Alert.alert("Success", "Logged in successfully!");
       // Redirect to Home page after successful login
-      router.push("/home");
+      router.push("/football");
     } catch (error: any) {
       Alert.alert("Error", error.message);
     }
