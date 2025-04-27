@@ -52,7 +52,7 @@ const SoccerFixturesScreen = () => {
         await new Promise((resolve) => setTimeout(resolve, 3000));
 
         const response = await axios.get(
-          "https://v3.football.api-sports.io/fixtures?date=2025-04-21",
+          "https://v3.football.api-sports.io/fixtures?date=2025-04-24",
           {
             headers: {
               "x-rapidapi-key": "1d65b111377ba2e919cdbc2e0c31b738",
