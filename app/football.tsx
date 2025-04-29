@@ -6,8 +6,10 @@ import {
   FlatList,
   ActivityIndicator,
   Image,
+  TouchableOpacity,
 } from "react-native";
 import axios from "axios";
+import { useRouter } from "expo-router";
 
 interface Team {
   id?: number;
@@ -24,19 +26,41 @@ interface Match {
       long?: string;
       short?: string;
     };
-    goals?: {
-      home?: number | null;
-      away?: number | null;
+    venue?: {
+      name?: string;
+      city?: string;
     };
-  };
-  teams?: {
-    home?: Team;
-    away?: Team;
   };
   league?: {
     name?: string;
     country?: string;
     logo?: string;
+  };
+  teams?: {
+    home?: Team;
+    away?: Team;
+  };
+  goals?: {
+    home?: number | null;
+    away?: number | null;
+  };
+  score?: {
+    halftime?: {
+      home?: number | null;
+      away?: number | null;
+    };
+    fulltime?: {
+      home?: number | null;
+      away?: number | null;
+    };
+    extratime?: {
+      home?: number | null;
+      away?: number | null;
+    };
+    penalty?: {
+      home?: number | null;
+      away?: number | null;
+    };
   };
 }
 
@@ -45,14 +69,17 @@ const SoccerFixturesScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const router = useRouter();
+  const today = new Date();
+  const formattedDate = today.toISOString().split("T")[0];
+
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Simulate 3 second delay for API response
         await new Promise((resolve) => setTimeout(resolve, 3000));
 
         const response = await axios.get(
-          "https://v3.football.api-sports.io/fixtures?date=2025-04-24",
+          `https://v3.football.api-sports.io/fixtures?date=${formattedDate}`,
           {
             headers: {
               "x-rapidapi-key": "1d65b111377ba2e919cdbc2e0c31b738",
@@ -74,7 +101,7 @@ const SoccerFixturesScreen = () => {
     };
 
     fetchData();
-  }, []);
+  }, [formattedDate]);
 
   const renderItem = ({ item }: { item: Match }) => {
     const fixture = item.fixture || {};
@@ -82,31 +109,23 @@ const SoccerFixturesScreen = () => {
     const teams = item.teams || {};
     const homeTeam = teams.home || {};
     const awayTeam = teams.away || {};
-    const goals = fixture.goals || {};
-
-    const homeGoals = goals.home;
-    const awayGoals = goals.away;
+    const goals = item.goals || {};
+    const score = item.score || {};
 
     return (
       <View style={styles.matchContainer}>
         {/* League Info */}
         {league.logo && (
           <View style={styles.leagueInfo}>
-            <Image
-              source={{ uri: league.logo }}
-              style={styles.leagueLogo}
-              resizeMode="contain"
-            />
+            <Image source={{ uri: league.logo }} style={styles.leagueLogo} />
             <Text style={styles.leagueText}>
-              {league.name || "Unknown League"} •{" "}
-              {league.country || "Unknown Country"}
+              {league.name} • {league.country}
             </Text>
           </View>
         )}
 
-        {/* Teams */}
+        {/* Teams and Score */}
         <View style={styles.teamsContainer}>
-          {/* Home Team */}
           <View style={styles.teamContainer}>
             <Image
               source={{
@@ -115,25 +134,19 @@ const SoccerFixturesScreen = () => {
                   "https://via.placeholder.com/60x60?text=HOME",
               }}
               style={styles.teamLogo}
-              resizeMode="contain"
             />
-            <Text style={styles.teamName}>{homeTeam.name || "Home Team"}</Text>
+            <Text style={styles.teamName}>{homeTeam.name || "Home"}</Text>
           </View>
 
-          {/* VS and Score */}
           <View style={styles.scoreContainer}>
             <Text style={styles.vsText}>VS</Text>
-            {homeGoals !== null &&
-              homeGoals !== undefined &&
-              awayGoals !== null &&
-              awayGoals !== undefined && (
-                <Text style={styles.scoreText}>
-                  {homeGoals} - {awayGoals}
-                </Text>
-              )}
+            {goals.home !== null && goals.away !== null && (
+              <Text style={styles.scoreText}>
+                {goals.home} - {goals.away}
+              </Text>
+            )}
           </View>
 
-          {/* Away Team */}
           <View style={styles.teamContainer}>
             <Image
               source={{
@@ -142,9 +155,8 @@ const SoccerFixturesScreen = () => {
                   "https://via.placeholder.com/60x60?text=AWAY",
               }}
               style={styles.teamLogo}
-              resizeMode="contain"
             />
-            <Text style={styles.teamName}>{awayTeam.name || "Away Team"}</Text>
+            <Text style={styles.teamName}>{awayTeam.name || "Away"}</Text>
           </View>
         </View>
 
@@ -158,6 +170,18 @@ const SoccerFixturesScreen = () => {
           <Text style={styles.detailText}>
             Status: {fixture.status?.long || "Unknown"}
           </Text>
+
+          {/* Goals */}
+          <Text style={styles.detailText}>
+            Halftime: {score.halftime?.home ?? "-"} -{" "}
+            {score.halftime?.away ?? "-"}
+          </Text>
+          <Text style={styles.detailText}>
+            Venue:{" "}
+            {fixture.venue?.name
+              ? `${fixture.venue.name}, ${fixture.venue.city}`
+              : "Unknown venue"}
+          </Text>
         </View>
       </View>
     );
@@ -165,24 +189,34 @@ const SoccerFixturesScreen = () => {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={styles.centered}>
         <ActivityIndicator size="large" />
-        <Text style={styles.loadingText}>Loading matches...</Text>
+        <Text>Loading matches...</Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Error: {error}</Text>
+      <View style={styles.centered}>
+        <Text style={{ color: "red" }}>Error: {error}</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Today's Matches</Text>
+      {/* 🏆 Logo stays at the top */}
+      <TouchableOpacity onPress={() => router.push("/sportscategories")}>
+        <Image
+          source={require("../assets/images/logo.png")} // adjust path if needed
+          style={styles.topLogo}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
+
+      <Text style={styles.header}>Matches for {formattedDate}</Text>
+
       <FlatList
         data={fixtures}
         renderItem={renderItem}
@@ -190,8 +224,8 @@ const SoccerFixturesScreen = () => {
           item?.fixture?.id?.toString() || `match-${index}`
         }
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No matches today</Text>
+          <View style={styles.centered}>
+            <Text>No matches found for today</Text>
           </View>
         }
       />
@@ -202,52 +236,29 @@ const SoccerFixturesScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: "#f4f4f4",
     padding: 16,
-    backgroundColor: "#f0f2f5",
   },
   header: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: "700",
-    marginBottom: 20,
-    textAlign: "center",
-    color: "#1a1a1a",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#555",
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  errorText: {
-    color: "#d9534f",
-    fontSize: 16,
+    marginBottom: 16,
     textAlign: "center",
   },
   matchContainer: {
-    backgroundColor: "#ffffff",
-    borderRadius: 12,
+    backgroundColor: "#fff",
+    borderRadius: 10,
     padding: 16,
-    marginBottom: 14,
+    marginBottom: 12,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowRadius: 5,
+    elevation: 3,
   },
   leagueInfo: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 10,
   },
   leagueLogo: {
     width: 24,
@@ -257,7 +268,7 @@ const styles = StyleSheet.create({
   leagueText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#444",
+    color: "#555",
   },
   teamsContainer: {
     flexDirection: "row",
@@ -270,51 +281,51 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   teamLogo: {
-    width: 55,
-    height: 55,
-    marginBottom: 6,
+    width: 50,
+    height: 50,
+    marginBottom: 4,
   },
   teamName: {
     fontSize: 13,
-    fontWeight: "500",
     textAlign: "center",
     color: "#333",
   },
   scoreContainer: {
     alignItems: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
   },
   vsText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#888",
+    color: "#999",
   },
   scoreText: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#1e88e5",
-    marginTop: 6,
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#007AFF",
   },
   matchDetails: {
-    borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
-    paddingTop: 10,
     marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+    paddingTop: 6,
   },
   detailText: {
-    fontSize: 13,
-    color: "#777",
+    fontSize: 12,
+    color: "#555",
     marginBottom: 2,
   },
-  emptyContainer: {
+  centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
   },
-  emptyText: {
-    fontSize: 16,
-    color: "#999",
+  topLogo: {
+    width: 120,
+    height: 60,
+    alignSelf: "center",
+    marginBottom: 16,
   },
 });
 
