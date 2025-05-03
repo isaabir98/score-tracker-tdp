@@ -1,274 +1,367 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
+  ScrollView,
   StyleSheet,
-  FlatList,
-  ActivityIndicator,
-  Image,
   TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
 } from "react-native";
 import axios from "axios";
-import { useRouter } from "expo-router";
 
-interface Team {
-  id?: number;
-  name?: string;
-  logo?: string;
-  winner?: boolean | null;
-}
-
-interface Match {
-  fixture?: {
-    id?: number;
-    date?: string;
-    status?: {
-      long?: string;
-      short?: string;
-    };
-    venue?: {
-      name?: string;
-      city?: string;
-    };
-  };
-  league?: {
-    name?: string;
-    country?: string;
-    logo?: string;
-  };
-  teams?: {
-    home?: Team;
-    away?: Team;
-  };
-  goals?: {
-    home?: number | null;
-    away?: number | null;
-  };
-  score?: {
-    halftime?: {
-      home?: number | null;
-      away?: number | null;
-    };
-    fulltime?: {
-      home?: number | null;
-      away?: number | null;
-    };
-    extratime?: {
-      home?: number | null;
-      away?: number | null;
-    };
-    penalty?: {
-      home?: number | null;
-      away?: number | null;
-    };
-  };
-}
-
-const SoccerFixturesScreen = () => {
-  const [fixtures, setFixtures] = useState<Match[]>([]);
+const LiveMatchStatsPage = () => {
+  const [fixtures, setFixtures] = useState([]);
+  const [selectedFixture, setSelectedFixture] = useState(null);
+  const [playerStats, setPlayerStats] = useState([]);
+  const [commentary, setCommentary] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const router = useRouter();
-  const today = new Date();
-  const formattedDate = today.toISOString().split("T")[0];
+  // SofaScore API endpoints
+  const SOFASCORE_API = "https://api.sofascore.com/api/v1";
+
+  // Fetch live matches from SofaScore
+  const fetchLiveMatches = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(
+        `${SOFASCORE_API}/sport/football/events/live`,
+      );
+      setFixtures(response.data.events);
+    } catch (error) {
+      console.error("Error fetching fixtures:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Fetch match details
+  const fetchFixtureDetails = async (fixture) => {
+    try {
+      setSelectedFixture(fixture);
+      setLoading(true);
+
+      const [incidentsResponse, statisticsResponse] = await Promise.all([
+        axios.get(`${SOFASCORE_API}/event/${fixture.id}/incidents`),
+        axios.get(`${SOFASCORE_API}/event/${fixture.id}/statistics`),
+      ]);
+
+      setCommentary(incidentsResponse.data.incidents);
+      setPlayerStats(statisticsResponse.data.statistics);
+    } catch (error) {
+      console.error("Error fetching fixture details:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Refresh data
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchLiveMatches();
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+    fetchLiveMatches();
+    const interval = setInterval(fetchLiveMatches, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
 
-        const response = await axios.get(
-          `https://v3.football.api-sports.io/fixtures?date=${formattedDate}`,
-          {
-            headers: {
-              "x-rapidapi-key": "1d65b111377ba2e919cdbc2e0c31b738",
-              "x-rapidapi-host": "v3.football.api-sports.io",
-            },
-          },
-        );
-
-        if (!response.data?.response) {
-          throw new Error("Invalid API response structure");
-        }
-
-        setFixtures(response.data.response);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error occurred");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [formattedDate]);
-
-  const renderItem = ({ item }: { item: Match }) => {
-    const fixture = item.fixture || {};
-    const league = item.league || {};
-    const teams = item.teams || {};
-    const homeTeam = teams.home || {};
-    const awayTeam = teams.away || {};
-    const goals = item.goals || {};
-    const score = item.score || {};
+  const renderMatchCard = ({ item }) => {
+    const isLive = item.status.type === "inprogress";
 
     return (
-      <View style={styles.matchContainer}>
-        {/* League Info */}
-        {league.logo && (
-          <View style={styles.leagueInfo}>
-            <Image source={{ uri: league.logo }} style={styles.leagueLogo} />
-            <Text style={styles.leagueText}>
-              {league.name} • {league.country}
-            </Text>
-          </View>
-        )}
+      <TouchableOpacity
+        style={[
+          styles.matchCard,
+          selectedFixture?.id === item.id && styles.selectedMatchCard,
+          isLive && styles.liveMatchCard,
+        ]}
+        onPress={() => fetchFixtureDetails(item)}
+      >
+        <View style={styles.matchHeader}>
+          <Text style={styles.leagueName}>{item.tournament.name}</Text>
+          {isLive && (
+            <View style={styles.liveBadge}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveText}>LIVE</Text>
+            </View>
+          )}
+        </View>
 
-        {/* Teams and Score */}
         <View style={styles.teamsContainer}>
-          <View style={styles.teamContainer}>
+          <View style={styles.team}>
             <Image
               source={{
-                uri:
-                  homeTeam.logo ||
-                  "https://via.placeholder.com/60x60?text=HOME",
+                uri: `https://api.sofascore.com/api/v1/team/${item.homeTeam.id}/image`,
               }}
               style={styles.teamLogo}
             />
-            <Text style={styles.teamName}>{homeTeam.name || "Home"}</Text>
+            <Text style={styles.teamName} numberOfLines={1}>
+              {item.homeTeam.name}
+            </Text>
           </View>
 
           <View style={styles.scoreContainer}>
-            <Text style={styles.vsText}>VS</Text>
-            {goals.home !== null && goals.away !== null && (
-              <Text style={styles.scoreText}>
-                {goals.home} - {goals.away}
-              </Text>
-            )}
+            <Text style={styles.scoreText}>
+              {item.homeScore.current || 0} - {item.awayScore.current || 0}
+            </Text>
+            <Text style={styles.matchTime}>{item.time.currentTime || 0}'</Text>
           </View>
 
-          <View style={styles.teamContainer}>
+          <View style={styles.team}>
             <Image
               source={{
-                uri:
-                  awayTeam.logo ||
-                  "https://via.placeholder.com/60x60?text=AWAY",
+                uri: `https://api.sofascore.com/api/v1/team/${item.awayTeam.id}/image`,
               }}
               style={styles.teamLogo}
             />
-            <Text style={styles.teamName}>{awayTeam.name || "Away"}</Text>
+            <Text style={styles.teamName} numberOfLines={1}>
+              {item.awayTeam.name}
+            </Text>
           </View>
         </View>
+      </TouchableOpacity>
+    );
+  };
 
-        {/* Match Details */}
-        <View style={styles.matchDetails}>
-          <Text style={styles.detailText}>
-            {fixture.date
-              ? new Date(fixture.date).toLocaleString()
-              : "Date not available"}
-          </Text>
-          <Text style={styles.detailText}>
-            Status: {fixture.status?.long || "Unknown"}
-          </Text>
+  const renderEventItem = ({ item }) => {
+    const getEventIcon = () => {
+      switch (item.incidentType) {
+        case "goal":
+          return "⚽";
+        case "card":
+          return "🟨";
+        case "substitution":
+          return "🔄";
+        default:
+          return "•";
+      }
+    };
 
-          {/* Goals */}
-          <Text style={styles.detailText}>
-            Halftime: {score.halftime?.home ?? "-"} -{" "}
-            {score.halftime?.away ?? "-"}
-          </Text>
-          <Text style={styles.detailText}>
-            Venue:{" "}
-            {fixture.venue?.name
-              ? `${fixture.venue.name}, ${fixture.venue.city}`
-              : "Unknown venue"}
+    return (
+      <View style={styles.eventItem}>
+        <Text style={styles.eventTime}>{item.time}'</Text>
+        <View style={styles.eventDetail}>
+          <Text style={styles.eventTeam}>{item.team?.name || ""}</Text>
+          <Text style={styles.eventText}>
+            {getEventIcon()} {item.text}
           </Text>
         </View>
       </View>
     );
   };
 
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-        <Text>Loading matches...</Text>
+  const renderStatItem = ({ item }) => (
+    <View style={styles.statItem}>
+      <Text style={styles.statName}>{item.name}</Text>
+      <View style={styles.statBarContainer}>
+        <View style={[styles.statBar, { width: `${item.homeValue}%` }]} />
+        <Text style={styles.statValue}>{item.homeValue}%</Text>
+        <Text style={styles.statValue}>{item.awayValue}%</Text>
+        <View
+          style={[
+            styles.statBar,
+            { width: `${item.awayValue}%`, backgroundColor: "#3498db" },
+          ]}
+        />
       </View>
-    );
-  }
+    </View>
+  );
 
-  if (error) {
+  if (loading && !fixtures.length) {
     return (
-      <View style={styles.centered}>
-        <Text style={{ color: "red" }}>Error: {error}</Text>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#3a7bd5" />
+        <Text style={styles.loadingText}>Loading live matches...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {/* 🏆 Logo stays at the top */}
-      <TouchableOpacity onPress={() => router.push("/sportscategories")}>
-        <Image
-          source={require("../assets/images/logo.png")} // adjust path if needed
-          style={styles.topLogo}
-          resizeMode="contain"
-        />
-      </TouchableOpacity>
+    <ScrollView
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
+      <Text style={styles.header}>⚽ Live Football Matches</Text>
 
-      <Text style={styles.header}>Matches for {formattedDate}</Text>
+      {fixtures.length === 0 ? (
+        <View style={styles.noMatchesContainer}>
+          <Text style={styles.noMatchesText}>No live matches currently</Text>
+        </View>
+      ) : (
+        <>
+          <FlatList
+            horizontal
+            data={fixtures}
+            renderItem={renderMatchCard}
+            keyExtractor={(item) => item.id.toString()}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.matchesList}
+          />
 
-      <FlatList
-        data={fixtures}
-        renderItem={renderItem}
-        keyExtractor={(item, index) =>
-          item?.fixture?.id?.toString() || `match-${index}`
-        }
-        ListEmptyComponent={
-          <View style={styles.centered}>
-            <Text>No matches found for today</Text>
-          </View>
-        }
-      />
-    </View>
+          {selectedFixture && (
+            <View style={styles.detailsContainer}>
+              <View style={styles.matchSummary}>
+                <View style={styles.summaryTeams}>
+                  <View style={styles.summaryTeam}>
+                    <Image
+                      source={{
+                        uri: `https://api.sofascore.com/api/v1/team/${selectedFixture.homeTeam.id}/image`,
+                      }}
+                      style={styles.summaryLogo}
+                    />
+                    <Text style={styles.summaryTeamName}>
+                      {selectedFixture.homeTeam.name}
+                    </Text>
+                  </View>
+                  <Text style={styles.summaryScore}>
+                    {selectedFixture.homeScore.current || 0} -{" "}
+                    {selectedFixture.awayScore.current || 0}
+                  </Text>
+                  <View style={styles.summaryTeam}>
+                    <Image
+                      source={{
+                        uri: `https://api.sofascore.com/api/v1/team/${selectedFixture.awayTeam.id}/image`,
+                      }}
+                      style={styles.summaryLogo}
+                    />
+                    <Text style={styles.summaryTeamName}>
+                      {selectedFixture.awayTeam.name}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.matchStatus}>
+                  {selectedFixture.status.description} (
+                  {selectedFixture.time.currentTime}')
+                </Text>
+              </View>
+
+              <Text style={styles.sectionHeader}>Match Statistics</Text>
+              {playerStats.length > 0 ? (
+                <FlatList
+                  data={playerStats[0].groups.flatMap(
+                    (group) => group.statisticsItems,
+                  )}
+                  renderItem={renderStatItem}
+                  keyExtractor={(item, index) => index.toString()}
+                  scrollEnabled={false}
+                />
+              ) : (
+                <Text style={styles.noDataText}>No statistics available</Text>
+              )}
+
+              <Text style={styles.sectionHeader}>Match Events</Text>
+              {commentary.length > 0 ? (
+                <FlatList
+                  data={commentary}
+                  renderItem={renderEventItem}
+                  keyExtractor={(item, index) => index.toString()}
+                  scrollEnabled={false}
+                />
+              ) : (
+                <Text style={styles.noDataText}>No events available yet</Text>
+              )}
+            </View>
+          )}
+        </>
+      )}
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f4f4f4",
-    padding: 16,
+    backgroundColor: "#f5f5f5",
+    padding: 10,
   },
   header: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginBottom: 16,
+    fontSize: 24,
+    fontWeight: "bold",
+    marginBottom: 15,
+    color: "#333",
     textAlign: "center",
   },
-  matchContainer: {
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 10,
+    color: "#666",
+  },
+  noMatchesContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  noMatchesText: {
+    fontSize: 18,
+    color: "#666",
+  },
+  matchesList: {
+    paddingBottom: 10,
+  },
+  matchCard: {
+    width: 280,
     backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 15,
+    marginRight: 12,
     shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 5,
+    shadowRadius: 4,
     elevation: 3,
   },
-  leagueInfo: {
+  liveMatchCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: "#e74c3c",
+  },
+  selectedMatchCard: {
+    borderWidth: 2,
+    borderColor: "#3a7bd5",
+  },
+  matchHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  leagueName: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "500",
+    flex: 1,
+  },
+  liveBadge: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
+    backgroundColor: "#e74c3c",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
-  leagueLogo: {
-    width: 24,
-    height: 24,
-    marginRight: 8,
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#fff",
+    marginRight: 4,
   },
-  leagueText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#555",
+  liveText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
   },
   teamsContainer: {
     flexDirection: "row",
@@ -276,57 +369,139 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  teamContainer: {
+  team: {
     alignItems: "center",
     flex: 1,
   },
   teamLogo: {
-    width: 50,
-    height: 50,
-    marginBottom: 4,
+    width: 40,
+    height: 40,
+    marginBottom: 5,
   },
   teamName: {
-    fontSize: 13,
+    fontSize: 14,
+    fontWeight: "500",
     textAlign: "center",
-    color: "#333",
   },
   scoreContainer: {
     alignItems: "center",
     paddingHorizontal: 10,
   },
-  vsText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#999",
-  },
   scoreText: {
-    marginTop: 4,
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#007AFF",
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#333",
   },
-  matchDetails: {
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-    paddingTop: 6,
-  },
-  detailText: {
+  matchTime: {
     fontSize: 12,
-    color: "#555",
-    marginBottom: 2,
+    color: "#666",
   },
-  centered: {
-    flex: 1,
-    justifyContent: "center",
+  detailsContainer: {
+    marginTop: 15,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 15,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  matchSummary: {
+    marginBottom: 20,
+  },
+  summaryTeams: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 10,
   },
-  topLogo: {
-    width: 120,
-    height: 60,
-    alignSelf: "center",
-    marginBottom: 16,
+  summaryTeam: {
+    alignItems: "center",
+    flex: 1,
+  },
+  summaryLogo: {
+    width: 50,
+    height: 50,
+    marginBottom: 5,
+  },
+  summaryTeamName: {
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+  summaryScore: {
+    fontSize: 28,
+    fontWeight: "bold",
+    paddingHorizontal: 15,
+    color: "#3a7bd5",
+  },
+  matchStatus: {
+    fontSize: 14,
+    color: "#666",
+    marginTop: 10,
+    textAlign: "center",
+  },
+  sectionHeader: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginTop: 20,
+    marginBottom: 10,
+    color: "#333",
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+    paddingBottom: 5,
+  },
+  eventItem: {
+    flexDirection: "row",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  eventTime: {
+    width: 30,
+    fontWeight: "bold",
+    color: "#3a7bd5",
+  },
+  eventDetail: {
+    flex: 1,
+  },
+  eventTeam: {
+    fontSize: 12,
+    color: "#666",
+  },
+  eventText: {
+    fontSize: 14,
+  },
+  statItem: {
+    marginBottom: 10,
+  },
+  statName: {
+    fontSize: 14,
+    marginBottom: 5,
+    color: "#333",
+  },
+  statBarContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  statBar: {
+    height: 8,
+    backgroundColor: "#e74c3c",
+    borderRadius: 4,
+    marginHorizontal: 5,
+  },
+  statValue: {
+    fontSize: 12,
+    width: 40,
+    textAlign: "center",
+  },
+  noDataText: {
+    color: "#888",
+    textAlign: "center",
+    marginVertical: 10,
   },
 });
 
-export default SoccerFixturesScreen;
+export default LiveMatchStatsPage;
