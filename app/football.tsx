@@ -16,14 +16,15 @@ const LiveMatchStatsPage = () => {
   const [fixtures, setFixtures] = useState([]);
   const [selectedFixture, setSelectedFixture] = useState(null);
   const [playerStats, setPlayerStats] = useState([]);
+  const [homePlayers, setHomePlayers] = useState([]);
+  const [awayPlayers, setAwayPlayers] = useState([]);
   const [commentary, setCommentary] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState("stats"); // 'stats', 'events', 'players'
 
-  // SofaScore API endpoints
   const SOFASCORE_API = "https://api.sofascore.com/api/v1";
 
-  // Fetch live matches from SofaScore
   const fetchLiveMatches = async () => {
     try {
       setLoading(true);
@@ -39,27 +40,57 @@ const LiveMatchStatsPage = () => {
     }
   };
 
-  // Fetch match details
   const fetchFixtureDetails = async (fixture) => {
     try {
       setSelectedFixture(fixture);
       setLoading(true);
 
-      const [incidentsResponse, statisticsResponse] = await Promise.all([
-        axios.get(`${SOFASCORE_API}/event/${fixture.id}/incidents`),
-        axios.get(`${SOFASCORE_API}/event/${fixture.id}/statistics`),
-      ]);
+      const incidentsRequest = axios.get(
+        `${SOFASCORE_API}/event/${fixture.id}/incidents`,
+      );
+
+      const statisticsRequest = axios
+        .get(`${SOFASCORE_API}/event/${fixture.id}/statistics`)
+        .catch((err) => {
+          if (err.response?.status === 404) {
+            console.warn(
+              "⚠️ Statistics not available for fixture:",
+              fixture.id,
+            );
+            return null;
+          }
+          throw err;
+        });
+
+      const lineupsRequest = axios
+        .get(`${SOFASCORE_API}/event/${fixture.id}/lineups`)
+        .catch((err) => {
+          if (err.response?.status === 404) {
+            console.warn("⚠️ Lineups not available for fixture:", fixture.id);
+            return null;
+          }
+          throw err;
+        });
+
+      const [incidentsResponse, statisticsResponse, lineupsResponse] =
+        await Promise.all([
+          incidentsRequest,
+          statisticsRequest,
+          lineupsRequest,
+        ]);
 
       setCommentary(incidentsResponse.data.incidents);
-      setPlayerStats(statisticsResponse.data.statistics);
+
+      setPlayerStats(statisticsResponse?.data?.statistics || []);
+      setHomePlayers(lineupsResponse?.data?.home?.players || []);
+      setAwayPlayers(lineupsResponse?.data?.away?.players || []);
     } catch (error) {
-      console.error("Error fetching fixture details:", error);
+      console.error("❌ Error fetching fixture details:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Refresh data
   const onRefresh = () => {
     setRefreshing(true);
     fetchLiveMatches();
@@ -67,9 +98,16 @@ const LiveMatchStatsPage = () => {
 
   useEffect(() => {
     fetchLiveMatches();
-    const interval = setInterval(fetchLiveMatches, 30000); // Refresh every 30 seconds
+    const interval = setInterval(fetchLiveMatches, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const getRatingColor = (rating) => {
+    if (rating >= 7.5) return "#4CAF50";
+    if (rating >= 6.0) return "#FFC107";
+    if (rating >= 4.5) return "#FF9800";
+    return "#F44336";
+  };
 
   const renderMatchCard = ({ item }) => {
     const isLive = item.status.type === "inprogress";
@@ -135,9 +173,12 @@ const LiveMatchStatsPage = () => {
         case "goal":
           return "⚽";
         case "card":
+          if (item.incidentClass === "red") return "🟥";
           return "🟨";
         case "substitution":
           return "🔄";
+        case "penalty":
+          return "🎯";
         default:
           return "•";
       }
@@ -169,6 +210,132 @@ const LiveMatchStatsPage = () => {
             { width: `${item.awayValue}%`, backgroundColor: "#3498db" },
           ]}
         />
+      </View>
+    </View>
+  );
+
+  const renderPlayerItem = ({ item }) => {
+    const rating = item.rating ? item.rating : 0;
+    const ratingPercentage = (rating / 10) * 100;
+
+    const commonStats = {
+      G: item.statistics?.goals ?? 0,
+      A: item.statistics?.assists ?? 0,
+      SH: item.statistics?.totalShots ?? 0,
+      ST: item.statistics?.shotsOnTarget ?? 0,
+      PS: item.statistics?.accuratePasses ?? 0,
+      DR: item.statistics?.dribbles ?? 0,
+      TK: item.statistics?.tackles ?? 0,
+      INT: item.statistics?.interceptions ?? 0,
+    };
+
+    return (
+      <View style={styles.playerItem}>
+        <View style={styles.playerInfo}>
+          <Text style={styles.playerNumber}>{item.number}</Text>
+          <Text style={styles.playerName} numberOfLines={1}>
+            {item.name}
+            {item.captain && <Text style={styles.captainBadge}> (C)</Text>}
+          </Text>
+        </View>
+
+        <View style={styles.playerStatsContainer}>
+          <View style={styles.ratingContainer}>
+            <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
+            <View style={styles.ratingBarBackground}>
+              <View
+                style={[
+                  styles.ratingBarFill,
+                  {
+                    width: `${ratingPercentage}%`,
+                    backgroundColor: getRatingColor(rating),
+                  },
+                ]}
+              />
+            </View>
+          </View>
+
+          <View style={styles.statsGrid}>
+            {Object.entries(commonStats).map(([key, value]) => (
+              <View key={key} style={styles.statCell}>
+                <Text style={styles.statValue}>{value}</Text>
+                <Text style={styles.statLabel}>{key}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderPlayerSection = ({ title, data }) => (
+    <View style={styles.playerSection}>
+      <View style={styles.sectionHeaderContainer}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <View style={styles.sectionStatsLegend}>
+          <Text style={styles.legendText}>G: Goals</Text>
+          <Text style={styles.legendText}>A: Assists</Text>
+          <Text style={styles.legendText}>SH: Shots</Text>
+          <Text style={styles.legendText}>ST: On Target</Text>
+        </View>
+      </View>
+
+      <View style={styles.playerPositionsContainer}>
+        {data.filter((p) => p.position === "G").length > 0 && (
+          <>
+            <Text style={styles.positionTitle}>Goalkeepers</Text>
+            <FlatList
+              data={data.filter((p) => p.position === "G")}
+              renderItem={renderPlayerItem}
+              keyExtractor={(item) => item.id.toString()}
+              scrollEnabled={false}
+            />
+          </>
+        )}
+
+        {data.filter((p) => ["D", "DC", "DL", "DR"].includes(p.position))
+          .length > 0 && (
+          <>
+            <Text style={styles.positionTitle}>Defenders</Text>
+            <FlatList
+              data={data.filter((p) =>
+                ["D", "DC", "DL", "DR"].includes(p.position),
+              )}
+              renderItem={renderPlayerItem}
+              keyExtractor={(item) => item.id.toString()}
+              scrollEnabled={false}
+            />
+          </>
+        )}
+
+        {data.filter((p) =>
+          ["M", "MC", "ML", "MR", "AM", "DM"].includes(p.position),
+        ).length > 0 && (
+          <>
+            <Text style={styles.positionTitle}>Midfielders</Text>
+            <FlatList
+              data={data.filter((p) =>
+                ["M", "MC", "ML", "MR", "AM", "DM"].includes(p.position),
+              )}
+              renderItem={renderPlayerItem}
+              keyExtractor={(item) => item.id.toString()}
+              scrollEnabled={false}
+            />
+          </>
+        )}
+
+        {data.filter((p) => ["F", "FW", "ST"].includes(p.position)).length >
+          0 && (
+          <>
+            <Text style={styles.positionTitle}>Forwards</Text>
+            <FlatList
+              data={data.filter((p) => ["F", "FW", "ST"].includes(p.position))}
+              renderItem={renderPlayerItem}
+              keyExtractor={(item) => item.id.toString()}
+              scrollEnabled={false}
+            />
+          </>
+        )}
       </View>
     </View>
   );
@@ -243,30 +410,115 @@ const LiveMatchStatsPage = () => {
                 </Text>
               </View>
 
-              <Text style={styles.sectionHeader}>Match Statistics</Text>
-              {playerStats.length > 0 ? (
-                <FlatList
-                  data={playerStats[0].groups.flatMap(
-                    (group) => group.statisticsItems,
+              <View style={styles.tabsContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.tab,
+                    activeTab === "stats" && styles.activeTab,
+                  ]}
+                  onPress={() => setActiveTab("stats")}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      activeTab === "stats" && styles.activeTabText,
+                    ]}
+                  >
+                    Stats
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.tab,
+                    activeTab === "events" && styles.activeTab,
+                  ]}
+                  onPress={() => setActiveTab("events")}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      activeTab === "events" && styles.activeTabText,
+                    ]}
+                  >
+                    Events
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.tab,
+                    activeTab === "players" && styles.activeTab,
+                  ]}
+                  onPress={() => setActiveTab("players")}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      activeTab === "players" && styles.activeTabText,
+                    ]}
+                  >
+                    Players
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {activeTab === "stats" && (
+                <>
+                  <Text style={styles.sectionHeader}>Match Statistics</Text>
+                  {playerStats.length > 0 ? (
+                    <FlatList
+                      data={playerStats[0].groups.flatMap(
+                        (group) => group.statisticsItems,
+                      )}
+                      renderItem={renderStatItem}
+                      keyExtractor={(item, index) => index.toString()}
+                      scrollEnabled={false}
+                    />
+                  ) : (
+                    <Text style={styles.noDataText}>
+                      No statistics available
+                    </Text>
                   )}
-                  renderItem={renderStatItem}
-                  keyExtractor={(item, index) => index.toString()}
-                  scrollEnabled={false}
-                />
-              ) : (
-                <Text style={styles.noDataText}>No statistics available</Text>
+                </>
               )}
 
-              <Text style={styles.sectionHeader}>Match Events</Text>
-              {commentary.length > 0 ? (
-                <FlatList
-                  data={commentary}
-                  renderItem={renderEventItem}
-                  keyExtractor={(item, index) => index.toString()}
-                  scrollEnabled={false}
-                />
-              ) : (
-                <Text style={styles.noDataText}>No events available yet</Text>
+              {activeTab === "events" && (
+                <>
+                  <Text style={styles.sectionHeader}>Match Events</Text>
+                  {commentary.length > 0 ? (
+                    <FlatList
+                      data={commentary}
+                      renderItem={renderEventItem}
+                      keyExtractor={(item, index) => index.toString()}
+                      scrollEnabled={false}
+                    />
+                  ) : (
+                    <Text style={styles.noDataText}>
+                      No events available yet
+                    </Text>
+                  )}
+                </>
+              )}
+
+              {activeTab === "players" && (
+                <>
+                  <Text style={styles.sectionHeader}>Player Statistics</Text>
+                  {homePlayers.length > 0 || awayPlayers.length > 0 ? (
+                    <View style={styles.playersContainer}>
+                      {renderPlayerSection({
+                        title: selectedFixture.homeTeam.name,
+                        data: homePlayers,
+                      })}
+                      {renderPlayerSection({
+                        title: selectedFixture.awayTeam.name,
+                        data: awayPlayers,
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.noDataText}>
+                      Player data not available
+                    </Text>
+                  )}
+                </>
               )}
             </View>
           )}
@@ -501,6 +753,161 @@ const styles = StyleSheet.create({
     color: "#888",
     textAlign: "center",
     marginVertical: 10,
+  },
+  tabsContainer: {
+    flexDirection: "row",
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  activeTab: {
+    borderBottomColor: "#3a7bd5",
+  },
+  tabText: {
+    fontSize: 14,
+    color: "#666",
+  },
+  activeTabText: {
+    color: "#3a7bd5",
+    fontWeight: "bold",
+  },
+  playersContainer: {
+    marginBottom: 20,
+  },
+  playerSection: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  sectionHeaderContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  sectionStatsLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    maxWidth: "60%",
+  },
+  legendText: {
+    fontSize: 10,
+    color: "#666",
+    marginRight: 8,
+  },
+  playerPositionsContainer: {
+    marginTop: 10,
+  },
+  positionTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#3a7bd5",
+    marginTop: 10,
+    marginBottom: 5,
+    paddingLeft: 5,
+    borderLeftWidth: 3,
+    borderLeftColor: "#3a7bd5",
+  },
+  playerItem: {
+    flexDirection: "row",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f5f5f5",
+    alignItems: "center",
+  },
+  playerInfo: {
+    width: 120,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  playerNumber: {
+    width: 24,
+    textAlign: "center",
+    fontWeight: "bold",
+    color: "#666",
+    fontSize: 14,
+  },
+  playerName: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  captainBadge: {
+    color: "#e74c3c",
+    fontSize: 12,
+  },
+  playerStatsContainer: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  ratingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  ratingText: {
+    width: 30,
+    fontWeight: "bold",
+    fontSize: 14,
+    color: "#333",
+    textAlign: "center",
+  },
+  ratingBarBackground: {
+    flex: 1,
+    height: 6,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 3,
+    overflow: "hidden",
+    marginLeft: 8,
+  },
+  ratingBarFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  statCell: {
+    width: "22%",
+    alignItems: "center",
+    marginBottom: 8,
+    backgroundColor: "#f9f9f9",
+    borderRadius: 4,
+    paddingVertical: 4,
+  },
+  statLabel: {
+    fontSize: 10,
+    color: "#666",
+    marginTop: 2,
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#333",
   },
 });
 

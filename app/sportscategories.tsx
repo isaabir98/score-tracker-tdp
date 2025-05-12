@@ -9,8 +9,10 @@ import {
   Dimensions,
   ActivityIndicator,
   FlatList,
+  TouchableOpacity,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons"; // Make sure to have this installed
 
 const sports = [
   {
@@ -240,6 +242,14 @@ const SportsCategories = () => {
           </Pressable>
         ))}
       </ScrollView>
+
+      {/* Floating Chat Icon */}
+      <Pressable
+        style={styles.chatButton}
+        onPress={() => navigation.navigate("ChatScreen" as never)}
+      >
+        <Text style={styles.chatButtonText}>💬</Text>
+      </Pressable>
     </View>
   );
 };
@@ -375,5 +385,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: "#333",
+  },
+  chatButton: {
+    position: "absolute",
+    bottom: 30,
+    right: 20,
+    backgroundColor: "#007bff",
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+    zIndex: 10,
+  },
+  chatButtonText: {
+    fontSize: 24,
+    color: "#fff",
   },
 });
