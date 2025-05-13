@@ -21,7 +21,8 @@ const LiveMatchStatsPage = () => {
   const [commentary, setCommentary] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState("stats"); // 'stats', 'events', 'players'
+  const [activeTab, setActiveTab] = useState("stats");
+  const [error, setError] = useState(null);
 
   const SOFASCORE_API = "https://api.sofascore.com/api/v1";
 
@@ -30,10 +31,18 @@ const LiveMatchStatsPage = () => {
       setLoading(true);
       const response = await axios.get(
         `${SOFASCORE_API}/sport/football/events/live`,
+        {
+          headers: {
+            "User-Agent": "YourApp/1.0",
+          },
+        },
       );
-      setFixtures(response.data.events);
+      setFixtures(response.data.events || []);
+      setError(null);
     } catch (error) {
       console.error("Error fetching fixtures:", error);
+      setError("Failed to load live matches. Please try again.");
+      setFixtures([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -44,48 +53,43 @@ const LiveMatchStatsPage = () => {
     try {
       setSelectedFixture(fixture);
       setLoading(true);
-
-      const incidentsRequest = axios.get(
-        `${SOFASCORE_API}/event/${fixture.id}/incidents`,
-      );
-
-      const statisticsRequest = axios
-        .get(`${SOFASCORE_API}/event/${fixture.id}/statistics`)
-        .catch((err) => {
-          if (err.response?.status === 404) {
-            console.warn(
-              "⚠️ Statistics not available for fixture:",
-              fixture.id,
-            );
-            return null;
-          }
-          throw err;
-        });
-
-      const lineupsRequest = axios
-        .get(`${SOFASCORE_API}/event/${fixture.id}/lineups`)
-        .catch((err) => {
-          if (err.response?.status === 404) {
-            console.warn("⚠️ Lineups not available for fixture:", fixture.id);
-            return null;
-          }
-          throw err;
-        });
+      setError(null);
 
       const [incidentsResponse, statisticsResponse, lineupsResponse] =
         await Promise.all([
-          incidentsRequest,
-          statisticsRequest,
-          lineupsRequest,
+          axios
+            .get(`${SOFASCORE_API}/event/${fixture.id}/incidents`)
+            .catch(() => ({ data: { incidents: [] } })),
+          axios
+            .get(`${SOFASCORE_API}/event/${fixture.id}/statistics`)
+            .catch(() => ({ data: { statistics: [] } })),
+          axios
+            .get(`${SOFASCORE_API}/event/${fixture.id}/lineups`)
+            .catch(() => ({
+              data: {
+                home: { players: [] },
+                away: { players: [] },
+              },
+            })),
         ]);
 
-      setCommentary(incidentsResponse.data.incidents);
+      setCommentary(incidentsResponse.data.incidents || []);
 
-      setPlayerStats(statisticsResponse?.data?.statistics || []);
-      setHomePlayers(lineupsResponse?.data?.home?.players || []);
-      setAwayPlayers(lineupsResponse?.data?.away?.players || []);
+      const stats = statisticsResponse.data.statistics || [];
+      if (stats.length > 0 && stats[0].groups) {
+        const allStats = stats[0].groups.flatMap(
+          (group) => group.statisticsItems || [],
+        );
+        setPlayerStats(allStats);
+      } else {
+        setPlayerStats([]);
+      }
+
+      setHomePlayers(lineupsResponse.data.home?.players || []);
+      setAwayPlayers(lineupsResponse.data.away?.players || []);
     } catch (error) {
-      console.error("❌ Error fetching fixture details:", error);
+      console.error("Error fetching fixture details:", error);
+      setError("Failed to load match details. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -340,15 +344,6 @@ const LiveMatchStatsPage = () => {
     </View>
   );
 
-  if (loading && !fixtures.length) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3a7bd5" />
-        <Text style={styles.loadingText}>Loading live matches...</Text>
-      </View>
-    );
-  }
-
   return (
     <ScrollView
       style={styles.container}
@@ -358,7 +353,18 @@ const LiveMatchStatsPage = () => {
     >
       <Text style={styles.header}>⚽ Live Football Matches</Text>
 
-      {fixtures.length === 0 ? (
+      {error && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
+      {loading && !fixtures.length ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3a7bd5" />
+          <Text style={styles.loadingText}>Loading live matches...</Text>
+        </View>
+      ) : fixtures.length === 0 ? (
         <View style={styles.noMatchesContainer}>
           <Text style={styles.noMatchesText}>No live matches currently</Text>
         </View>
@@ -466,16 +472,14 @@ const LiveMatchStatsPage = () => {
                   <Text style={styles.sectionHeader}>Match Statistics</Text>
                   {playerStats.length > 0 ? (
                     <FlatList
-                      data={playerStats[0].groups.flatMap(
-                        (group) => group.statisticsItems,
-                      )}
+                      data={playerStats}
                       renderItem={renderStatItem}
                       keyExtractor={(item, index) => index.toString()}
                       scrollEnabled={false}
                     />
                   ) : (
                     <Text style={styles.noDataText}>
-                      No statistics available
+                      No statistics available for this match
                     </Text>
                   )}
                 </>
@@ -908,6 +912,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
     color: "#333",
+  },
+  errorContainer: {
+    backgroundColor: "#ffebee",
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 15,
+  },
+  errorText: {
+    color: "#d32f2f",
+    textAlign: "center",
   },
 });
 

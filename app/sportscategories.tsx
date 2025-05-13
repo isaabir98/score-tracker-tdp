@@ -8,11 +8,11 @@ import {
   Pressable,
   Dimensions,
   ActivityIndicator,
-  FlatList,
+  Linking,
+  Modal,
   TouchableOpacity,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons"; // Make sure to have this installed
 
 const sports = [
   {
@@ -61,170 +61,94 @@ const sports = [
   },
 ];
 
-interface Team {
-  name: string;
-  logo?: string;
-  score?: string;
-  homeAway?: string;
-}
-
-interface Event {
-  id: string;
-  name: string;
-  date: string;
-  status: {
-    type: {
-      name: string;
-      description: string;
-    };
-  };
-  competitions: {
-    competitors: Team[];
-    status: {
-      type: {
-        description: string;
-      };
-    };
-  }[];
-}
-
-interface League {
-  id: string;
-  name: string;
-  logo: string;
-  events: Event[];
-}
-
 const SportsCategories = () => {
   const navigation = useNavigation();
-  const [leagues, setLeagues] = useState<League[]>([]);
+  const [headlines, setHeadlines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showNewsModal, setShowNewsModal] = useState(false);
 
   const handlePress = (route: string) => {
     navigation.navigate(route.replace("/", "") as never);
   };
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchNews = async () => {
+      setLoading(true);
       try {
         const response = await fetch(
-          "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard?lang=en&region=gb&calendartype=whitelist&limit=100&dates=20250420&league=eng.1",
+          "https://newsdata.io/api/1/news?apikey=pub_86626b9ca953ed8804e99caea2e91f42e6c45&category=sports&language=en",
         );
         const data = await response.json();
-
-        const leagueData: League = {
-          id: data.leagues[0].id,
-          name: data.leagues[0].name,
-          logo: data.leagues[0].logos[0].href,
-          events: data.events.map((event: any) => ({
-            id: event.id,
-            name: event.name,
-            date: event.date,
-            status: event.status,
-            competitions: event.competitions.map((comp: any) => ({
-              competitors: comp.competitors.map((team: any) => ({
-                name: team.team.displayName,
-                logo: team.team.logos?.[0]?.href,
-                score: team.score,
-                homeAway: team.homeAway,
-              })),
-              status: comp.status,
-            })),
-          })),
-        };
-
-        setLeagues([leagueData]);
+        const uniqueNews =
+          data.results?.filter(
+            (item: any, index: number, self: any[]) =>
+              self.findIndex((t) => t.title === item.title) === index,
+          ) || [];
+        setHeadlines(uniqueNews);
       } catch (err) {
-        setError("Failed to fetch data from ESPN API");
+        setError("Failed to load news.");
         console.error(err);
       } finally {
         setLoading(false);
       }
     };
-
-    fetchData();
+    fetchNews();
   }, []);
-
-  const renderEventItem = ({ item }: { item: Event }) => {
-    const competition = item.competitions[0];
-    const homeTeam = competition.competitors.find((t) => t.homeAway === "home");
-    const awayTeam = competition.competitors.find((t) => t.homeAway === "away");
-
-    return (
-      <View style={styles.eventContainer}>
-        <Text style={styles.eventName}>{item.name}</Text>
-        <Text style={styles.eventDate}>
-          {new Date(item.date).toLocaleString()}
-        </Text>
-        <Text style={styles.eventStatus}>
-          Status: {item.status.type.description}
-        </Text>
-
-        <View style={styles.teamsContainer}>
-          {homeTeam && (
-            <View style={styles.teamContainer}>
-              {homeTeam.logo && (
-                <Image
-                  source={{ uri: homeTeam.logo }}
-                  style={styles.teamLogo}
-                />
-              )}
-              <Text style={styles.teamName}>{homeTeam.name}</Text>
-              <Text style={styles.teamScore}>{homeTeam.score || "0"}</Text>
-            </View>
-          )}
-
-          <Text style={styles.vsText}>vs</Text>
-
-          {awayTeam && (
-            <View style={styles.teamContainer}>
-              {awayTeam.logo && (
-                <Image
-                  source={{ uri: awayTeam.logo }}
-                  style={styles.teamLogo}
-                />
-              )}
-              <Text style={styles.teamName}>{awayTeam.name}</Text>
-              <Text style={styles.teamScore}>{awayTeam.score || "0"}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  };
 
   return (
     <View style={styles.container}>
-      {/* News Section */}
-      <View style={styles.newsPanel}>
-        <Text style={styles.newsTitle}>⚽ ESPN Football Updates</Text>
+      {/* News Modal */}
+      <Modal visible={showNewsModal} animationType="slide" transparent={false}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>🗞️ Sports News</Text>
+          <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+            {loading ? (
+              <ActivityIndicator size="large" color="#0000ff" />
+            ) : error ? (
+              <Text style={styles.errorText}>{error}</Text>
+            ) : (
+              headlines.map((article, index) => (
+                <View key={index} style={styles.articleContainer}>
+                  <Text style={styles.articleTitle}>{article.title}</Text>
+                  {article.image_url && (
+                    <Image
+                      source={{ uri: article.image_url }}
+                      style={styles.articleImage}
+                      resizeMode="cover"
+                    />
+                  )}
+                  <Text style={styles.articleDescription}>
+                    {article.description}
+                  </Text>
+                  {article.link && (
+                    <Text
+                      style={styles.articleLink}
+                      onPress={() => Linking.openURL(article.link)}
+                    >
+                      Read more
+                    </Text>
+                  )}
+                </View>
+              ))
+            )}
+          </ScrollView>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => setShowNewsModal(false)}
+          >
+            <Text style={styles.closeButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
-        {loading ? (
-          <ActivityIndicator size="small" color="#0000ff" />
-        ) : error ? (
-          <Text style={styles.errorText}>{error}</Text>
-        ) : leagues.length > 0 ? (
-          <>
-            <View style={styles.leagueHeader}>
-              <Image
-                source={{ uri: leagues[0].logo }}
-                style={styles.leagueLogo}
-              />
-              <Text style={styles.leagueName}>{leagues[0].name}</Text>
-            </View>
-
-            <FlatList
-              data={leagues[0].events}
-              renderItem={renderEventItem}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.eventsList}
-            />
-          </>
-        ) : (
-          <Text style={styles.noEventsText}>No events available</Text>
-        )}
-      </View>
+      {/* Open News Button */}
+      <Pressable
+        style={styles.newsButton}
+        onPress={() => setShowNewsModal(true)}
+      >
+        <Text style={styles.newsButtonText}>🗞️ News</Text>
+      </Pressable>
 
       {/* Sports Categories Grid */}
       <ScrollView contentContainerStyle={styles.grid}>
@@ -243,7 +167,7 @@ const SportsCategories = () => {
         ))}
       </ScrollView>
 
-      {/* Floating Chat Icon */}
+      {/* Floating Chat Button */}
       <Pressable
         style={styles.chatButton}
         onPress={() => navigation.navigate("ChatScreen" as never)}
@@ -261,109 +185,20 @@ const { width } = Dimensions.get("window");
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    flexDirection: "row",
     backgroundColor: "#eaf0f6",
-  },
-  newsPanel: {
-    width: width * 0.3,
-    padding: 15,
-    backgroundColor: "#ffffff",
-    borderRightWidth: 1,
-    borderColor: "#ddd",
-  },
-  newsTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 12,
-    textAlign: "center",
-  },
-  leagueHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 15,
-  },
-  leagueLogo: {
-    width: 40,
-    height: 40,
-    marginRight: 10,
-  },
-  leagueName: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  eventsList: {
-    paddingBottom: 20,
-  },
-  eventContainer: {
-    marginBottom: 20,
-    padding: 10,
-    backgroundColor: "#f8f8f8",
-    borderRadius: 8,
-  },
-  eventName: {
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 5,
-  },
-  eventDate: {
-    fontSize: 12,
-    color: "#666",
-    marginBottom: 5,
-  },
-  eventStatus: {
-    fontSize: 12,
-    fontStyle: "italic",
-    marginBottom: 10,
-    color: "#555",
-  },
-  teamsContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 5,
-  },
-  teamContainer: {
-    alignItems: "center",
-    flex: 1,
-  },
-  teamLogo: {
-    width: 30,
-    height: 30,
-    marginBottom: 5,
-  },
-  teamName: {
-    fontSize: 12,
-    textAlign: "center",
-    marginBottom: 3,
-  },
-  teamScore: {
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  vsText: {
-    fontSize: 12,
-    marginHorizontal: 5,
-  },
-  errorText: {
-    color: "red",
-    textAlign: "center",
-  },
-  noEventsText: {
-    textAlign: "center",
-    color: "#666",
+    paddingTop: 20,
   },
   grid: {
-    flexGrow: 1,
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
     padding: 10,
   },
   card: {
-    width: width * 0.28,
+    width: width * 0.4,
     margin: 10,
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
+    backgroundColor: "#fff",
+    borderRadius: 12,
     alignItems: "center",
     padding: 16,
     shadowColor: "#000",
@@ -373,13 +208,13 @@ const styles = StyleSheet.create({
   },
   cardPressed: {
     backgroundColor: "#dceeff",
-    transform: [{ scale: 0.98 }],
+    transform: [{ scale: 0.97 }],
   },
   image: {
-    width: 150,
-    height: 150,
+    width: 100,
+    height: 100,
     resizeMode: "contain",
-    marginBottom: 12,
+    marginBottom: 10,
   },
   label: {
     fontSize: 15,
@@ -401,10 +236,71 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-    zIndex: 10,
   },
   chatButtonText: {
     fontSize: 24,
     color: "#fff",
+  },
+  newsButton: {
+    alignSelf: "center",
+    backgroundColor: "#333",
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    marginBottom: 10,
+  },
+  newsButtonText: {
+    color: "#fff",
+    fontSize: 16,
+  },
+  modalContent: {
+    flex: 1,
+    backgroundColor: "#fff",
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  articleContainer: {
+    marginBottom: 20,
+  },
+  articleTitle: {
+    fontWeight: "600",
+    fontSize: 14,
+    marginBottom: 5,
+  },
+  articleImage: {
+    width: "100%",
+    height: 100,
+    borderRadius: 8,
+    backgroundColor: "#ccc",
+  },
+  articleDescription: {
+    fontSize: 12,
+    color: "#444",
+    marginTop: 4,
+  },
+  articleLink: {
+    fontSize: 12,
+    color: "#007bff",
+    marginTop: 4,
+  },
+  closeButton: {
+    backgroundColor: "#007bff",
+    padding: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  closeButtonText: {
+    color: "#fff",
+    fontSize: 16,
+  },
+  errorText: {
+    color: "red",
+    textAlign: "center",
   },
 });

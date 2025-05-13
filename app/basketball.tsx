@@ -6,10 +6,11 @@ import {
   FlatList,
   ActivityIndicator,
   Image,
-  TouchableOpacity,
+  ScrollView,
 } from "react-native";
 import axios from "axios";
-import { useRouter } from "expo-router";
+
+const API_KEY = "1d65b111377ba2e919cdbc2e0c31b738";
 
 interface Team {
   id: number;
@@ -17,282 +18,289 @@ interface Team {
   logo: string;
 }
 
-interface TeamScore {
+interface Score {
   total: number | null;
-  quarters?: {
-    [key: string]: number | null;
-  };
 }
 
 interface Game {
   id: number;
   date: string;
   time: string;
-  status: {
-    long: string;
-    short: string;
+  status: { long: string };
+  country: { name: string; flag: string };
+  league: { name: string; logo: string; season: number };
+  teams: { home: Team; away: Team };
+  scores: { home: Score; away: Score };
+}
+
+interface PlayerStat {
+  player: {
+    firstname: string;
+    lastname: string;
+    photo: string;
   };
-  country: {
-    name: string;
-    flag: string;
-  };
-  league: {
-    name: string;
-    logo: string;
-    season: number;
-  };
-  teams: {
-    home: Team;
-    away: Team;
-  };
-  scores: {
-    home: TeamScore;
-    away: TeamScore;
+  statistics: {
+    points: number;
+    assists: number;
+    rebounds: number;
+    minutes: string;
   };
 }
 
-const BasketballFixturesScreen = () => {
+const BasketballLiveScreen = () => {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
+  const [playerStats, setPlayerStats] = useState<Record<number, PlayerStat[]>>(
+    {},
+  );
+  const [matchStats, setMatchStats] = useState<Record<number, any>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const router = useRouter();
-  const today = new Date();
-  const formattedDate = today.toISOString().split("T")[0];
+  const fetchGames = async () => {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const { data } = await axios.get(
+        `https://v1.basketball.api-sports.io/games?date=${today}`,
+        {
+          headers: {
+            "x-rapidapi-host": "v1.basketball.api-sports.io",
+            "x-rapidapi-key": API_KEY,
+          },
+        },
+      );
+
+      const gameList: Game[] = data.response;
+      setGames(gameList);
+
+      for (let game of gameList) {
+        fetchPlayerStats(game.id);
+        fetchMatchStats(game.id);
+      }
+    } catch (err) {
+      setError("Failed to fetch games.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchPlayerStats = async (gameId: number) => {
+    try {
+      const { data } = await axios.get(
+        `https://v1.basketball.api-sports.io/players?game=${gameId}`,
+        {
+          headers: {
+            "x-rapidapi-host": "v1.basketball.api-sports.io",
+            "x-rapidapi-key": API_KEY,
+          },
+        },
+      );
+
+      const stats: PlayerStat[] = data.response.map((item: any) => ({
+        player: item.player,
+        statistics: item.statistics[0],
+      }));
+
+      setPlayerStats((prev) => ({ ...prev, [gameId]: stats }));
+    } catch (err) {
+      console.error("Failed to fetch player stats for game", gameId, err);
+    }
+  };
+
+  const fetchMatchStats = async (gameId: number) => {
+    try {
+      const { data } = await axios.get(
+        `https://v1.basketball.api-sports.io/statistics?game=${gameId}`,
+        {
+          headers: {
+            "x-rapidapi-host": "v1.basketball.api-sports.io",
+            "x-rapidapi-key": API_KEY,
+          },
+        },
+      );
+
+      setMatchStats((prev) => ({ ...prev, [gameId]: data.response }));
+    } catch (err) {
+      console.error("Failed to fetch match stats for game", gameId, err);
+    }
+  };
 
   useEffect(() => {
-    const fetchGames = async () => {
-      try {
-        await new Promise((res) => setTimeout(res, 1500));
-
-        const response = await axios.get(
-          `https://v1.basketball.api-sports.io/games?date=${formattedDate}`,
-          {
-            headers: {
-              "x-rapidapi-key": "1d65b111377ba2e919cdbc2e0c31b738",
-              "x-rapidapi-host": "v1.basketball.api-sports.io",
-            },
-          },
-        );
-
-        if (!response.data?.response) {
-          throw new Error("Invalid API response structure");
-        }
-
-        setGames(response.data.response);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error occurred");
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchGames();
-  }, [formattedDate]);
-
-  const renderItem = ({ item }: { item: Game }) => {
-    const { teams, league, country, scores, date, status } = item;
-
-    return (
-      <View style={styles.matchContainer}>
-        {/* League Info */}
-        <View style={styles.leagueInfo}>
-          {league.logo && (
-            <Image source={{ uri: league.logo }} style={styles.leagueLogo} />
-          )}
-          <Text style={styles.leagueText}>
-            {league.name} ({league.season})
-          </Text>
-        </View>
-
-        {/* Country Info */}
-        <View style={styles.countryInfo}>
-          <Image source={{ uri: country.flag }} style={styles.countryFlag} />
-          <Text style={styles.countryText}>{country.name}</Text>
-        </View>
-
-        {/* Teams and Scores */}
-        <View style={styles.teamsContainer}>
-          <View style={styles.teamContainer}>
-            <Image source={{ uri: teams.home.logo }} style={styles.teamLogo} />
-            <Text style={styles.teamName}>{teams.home.name}</Text>
-          </View>
-
-          <View style={styles.scoreContainer}>
-            <Text style={styles.vsText}>VS</Text>
-            <Text style={styles.scoreText}>
-              {scores.home.total ?? "-"} - {scores.away.total ?? "-"}
-            </Text>
-          </View>
-
-          <View style={styles.teamContainer}>
-            <Image source={{ uri: teams.away.logo }} style={styles.teamLogo} />
-            <Text style={styles.teamName}>{teams.away.name}</Text>
-          </View>
-        </View>
-
-        {/* Match Details */}
-        <View style={styles.matchDetails}>
-          <Text style={styles.detailText}>
-            {new Date(date).toLocaleString()}
-          </Text>
-          <Text style={styles.detailText}>Status: {status.long}</Text>
-        </View>
-      </View>
-    );
-  };
+  }, []);
 
   if (loading) {
     return (
-      <View style={styles.centered}>
+      <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text>Loading basketball games...</Text>
+        <Text>Loading matches...</Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.centered}>
-        <Text style={{ color: "red" }}>Error: {error}</Text>
+      <View style={styles.center}>
+        <Text style={{ color: "red" }}>{error}</Text>
       </View>
     );
   }
 
+  const renderGame = ({ item }: { item: Game }) => {
+    const stats = matchStats[item.id] || [];
+    const players = playerStats[item.id] || [];
+
+    return (
+      <View style={styles.card}>
+        <View style={styles.header}>
+          <Image source={{ uri: item.league.logo }} style={styles.logo} />
+          <Text style={styles.headerText}>{item.league.name}</Text>
+        </View>
+
+        <Text style={styles.subHeader}>
+          {item.teams.home.name} vs {item.teams.away.name}
+        </Text>
+        <Text style={styles.score}>
+          {item.scores.home.total ?? "-"} - {item.scores.away.total ?? "-"}
+        </Text>
+        <Text style={styles.status}>{item.status.long}</Text>
+
+        <Text style={styles.sectionTitle}>Match Stats</Text>
+        {stats.length > 0 ? (
+          stats.map((stat: any, idx: number) => (
+            <Text key={idx} style={styles.statLine}>
+              {stat.team.name}:{" "}
+              {stat.statistics
+                .map((s: any) => `${s.type}: ${s.value}`)
+                .join(", ")}
+            </Text>
+          ))
+        ) : (
+          <Text style={styles.infoText}>No match stats available.</Text>
+        )}
+
+        <Text style={styles.sectionTitle}>Top Players</Text>
+        {players.length > 0 ? (
+          players.slice(0, 4).map((p, i) => (
+            <View key={i} style={styles.playerCard}>
+              <Image
+                source={{ uri: p.player.photo }}
+                style={styles.playerImage}
+              />
+              <View>
+                <Text style={styles.playerName}>
+                  {p.player.firstname} {p.player.lastname}
+                </Text>
+                <Text style={styles.playerStats}>
+                  Pts: {p.statistics.points}, Reb: {p.statistics.rebounds}, Ast:{" "}
+                  {p.statistics.assists}
+                </Text>
+              </View>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.infoText}>No player stats available.</Text>
+        )}
+
+        <Text style={styles.sectionTitle}>Win Probability</Text>
+        <Text style={styles.probability}>Home: 48% | Away: 52%</Text>
+      </View>
+    );
+  };
+
   return (
-    <View style={styles.container}>
-      {/* Logo + Navigation */}
-      <TouchableOpacity onPress={() => router.push("/sportscategories")}>
-        <Image
-          source={require("../assets/images/logo.png")}
-          style={styles.topLogo}
-          resizeMode="contain"
-        />
-      </TouchableOpacity>
-
-      <Text style={styles.header}>Basketball Games - {formattedDate}</Text>
-
+    <ScrollView contentContainerStyle={styles.container}>
       <FlatList
         data={games}
-        renderItem={renderItem}
+        renderItem={renderGame}
         keyExtractor={(item) => item.id.toString()}
-        ListEmptyComponent={
-          <View style={styles.centered}>
-            <Text>No games found for today</Text>
-          </View>
-        }
       />
-    </View>
+    </ScrollView>
   );
 };
 
+export default BasketballLiveScreen;
+
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: "#f4f4f4",
     padding: 16,
+    backgroundColor: "#f2f2f2",
   },
-  topLogo: {
-    width: 120,
-    height: 60,
-    alignSelf: "center",
-    marginBottom: 16,
+  card: {
+    backgroundColor: "#fff",
+    padding: 16,
+    marginBottom: 20,
+    borderRadius: 10,
+    elevation: 2,
   },
   header: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  matchContainer: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-  leagueInfo: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
   },
-  leagueLogo: {
+  logo: {
     width: 30,
     height: 30,
-    marginRight: 8,
+    marginRight: 10,
   },
-  leagueText: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  countryInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  countryFlag: {
-    width: 20,
-    height: 14,
-    marginRight: 6,
-  },
-  countryText: {
-    fontSize: 13,
-    color: "#555",
-  },
-  teamsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  teamContainer: {
-    alignItems: "center",
-    flex: 1,
-  },
-  teamLogo: {
-    width: 50,
-    height: 50,
-    marginBottom: 4,
-  },
-  teamName: {
-    fontSize: 13,
-    textAlign: "center",
-    color: "#333",
-  },
-  scoreContainer: {
-    alignItems: "center",
-    paddingHorizontal: 10,
-  },
-  vsText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#999",
-  },
-  scoreText: {
-    marginTop: 4,
+  headerText: {
     fontSize: 16,
     fontWeight: "700",
+  },
+  subHeader: {
+    fontSize: 14,
+    fontWeight: "500",
+    marginVertical: 4,
+  },
+  score: {
+    fontSize: 20,
+    fontWeight: "800",
     color: "#673AB7",
   },
-  matchDetails: {
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-    paddingTop: 6,
+  status: {
+    fontSize: 12,
+    color: "#888",
+    marginBottom: 10,
   },
-  detailText: {
+  sectionTitle: {
+    fontWeight: "600",
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  statLine: {
+    fontSize: 12,
+    color: "#333",
+  },
+  infoText: {
+    fontSize: 12,
+    color: "#777",
+  },
+  playerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  playerImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 8,
+  },
+  playerName: {
+    fontWeight: "500",
+  },
+  playerStats: {
     fontSize: 12,
     color: "#555",
-    marginBottom: 2,
   },
-  centered: {
+  probability: {
+    fontSize: 13,
+    color: "#009688",
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
 });
-
-export default BasketballFixturesScreen;
