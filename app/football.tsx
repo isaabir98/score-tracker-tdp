@@ -9,8 +9,18 @@ import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
+  TextInput,
 } from "react-native";
 import axios from "axios";
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db } from "@/constants/firebaseConfig";
 
 const LiveMatchStatsPage = () => {
   const [fixtures, setFixtures] = useState([]);
@@ -23,6 +33,8 @@ const LiveMatchStatsPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("stats");
   const [error, setError] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatText, setChatText] = useState("");
 
   const SOFASCORE_API = "https://api.sofascore.com/api/v1";
 
@@ -85,8 +97,22 @@ const LiveMatchStatsPage = () => {
         setPlayerStats([]);
       }
 
-      setHomePlayers(lineupsResponse.data.home?.players || []);
-      setAwayPlayers(lineupsResponse.data.away?.players || []);
+      // Process players data to ensure consistent structure
+      const processPlayers = (players) => {
+        return players.map((player) => ({
+          id: player.player?.id || Math.random().toString(36).substring(7),
+          name: player.player?.shortName || player.player?.name || "Unknown",
+          number: player.player?.shirtNumber || 0,
+          position: player.position || "Unknown",
+          rating: player.statistics?.rating || 0,
+          statistics: player.statistics || {},
+          captain: player.player?.captain || false,
+          substitute: player.substitute || false,
+        }));
+      };
+
+      setHomePlayers(processPlayers(lineupsResponse.data.home?.players || []));
+      setAwayPlayers(processPlayers(lineupsResponse.data.away?.players || []));
     } catch (error) {
       console.error("Error fetching fixture details:", error);
       setError("Failed to load match details. Please try again.");
@@ -98,6 +124,48 @@ const LiveMatchStatsPage = () => {
   const onRefresh = () => {
     setRefreshing(true);
     fetchLiveMatches();
+  };
+
+  useEffect(() => {
+    if (selectedFixture) {
+      const chatQuery = query(
+        collection(db, `match_chats_${selectedFixture.id}`),
+        orderBy("createdAt", "desc"),
+      );
+
+      const unsubscribe = onSnapshot(chatQuery, (snapshot) => {
+        const msgs = snapshot.docs
+          .map((doc) => {
+            const data = doc.data();
+            const createdAt = data.createdAt?.toDate?.();
+            if (!createdAt || typeof data.text !== "string") return null;
+            return {
+              id: doc.id,
+              text: data.text,
+              createdAt,
+            };
+          })
+          .filter(Boolean);
+        setChatMessages(msgs);
+      });
+
+      return unsubscribe;
+    }
+  }, [selectedFixture]);
+
+  const sendChatMessage = async () => {
+    const trimmed = chatText.trim();
+    if (!trimmed || !selectedFixture) return;
+
+    try {
+      await addDoc(collection(db, `match_chats_${selectedFixture.id}`), {
+        text: trimmed,
+        createdAt: serverTimestamp(),
+      });
+      setChatText("");
+    } catch (err) {
+      console.error("Chat send error:", err);
+    }
   };
 
   useEffect(() => {
@@ -219,7 +287,7 @@ const LiveMatchStatsPage = () => {
   );
 
   const renderPlayerItem = ({ item }) => {
-    const rating = item.rating ? item.rating : 0;
+    const rating = item.rating ? parseFloat(item.rating) : 0;
     const ratingPercentage = (rating / 10) * 100;
 
     const commonStats = {
@@ -227,14 +295,18 @@ const LiveMatchStatsPage = () => {
       A: item.statistics?.assists ?? 0,
       SH: item.statistics?.totalShots ?? 0,
       ST: item.statistics?.shotsOnTarget ?? 0,
-      PS: item.statistics?.accuratePasses ?? 0,
+      PS: `${item.statistics?.accuratePasses ?? 0}/${
+        item.statistics?.totalPasses ?? 1
+      }`,
       DR: item.statistics?.dribbles ?? 0,
       TK: item.statistics?.tackles ?? 0,
       INT: item.statistics?.interceptions ?? 0,
     };
 
     return (
-      <View style={styles.playerItem}>
+      <View
+        style={[styles.playerItem, item.substitute && styles.substitutePlayer]}
+      >
         <View style={styles.playerInfo}>
           <Text style={styles.playerNumber}>{item.number}</Text>
           <Text style={styles.playerName} numberOfLines={1}>
@@ -272,77 +344,89 @@ const LiveMatchStatsPage = () => {
     );
   };
 
-  const renderPlayerSection = ({ title, data }) => (
-    <View style={styles.playerSection}>
-      <View style={styles.sectionHeaderContainer}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <View style={styles.sectionStatsLegend}>
-          <Text style={styles.legendText}>G: Goals</Text>
-          <Text style={styles.legendText}>A: Assists</Text>
-          <Text style={styles.legendText}>SH: Shots</Text>
-          <Text style={styles.legendText}>ST: On Target</Text>
+  const renderPlayerSection = ({ title, data }) => {
+    // Filter out substitutes if you only want to show starters
+    const startingPlayers = data.filter((player) => !player.substitute);
+
+    return (
+      <View style={styles.playerSection}>
+        <View style={styles.sectionHeaderContainer}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          <View style={styles.sectionStatsLegend}>
+            <Text style={styles.legendText}>G: Goals</Text>
+            <Text style={styles.legendText}>A: Assists</Text>
+            <Text style={styles.legendText}>PS: Passes</Text>
+            <Text style={styles.legendText}>DR: Dribbles</Text>
+          </View>
+        </View>
+
+        <View style={styles.playerPositionsContainer}>
+          {/* Goalkeepers */}
+          {startingPlayers.filter((p) => p.position === "G").length > 0 && (
+            <>
+              <Text style={styles.positionTitle}>Goalkeepers</Text>
+              <FlatList
+                data={startingPlayers.filter((p) => p.position === "G")}
+                renderItem={renderPlayerItem}
+                keyExtractor={(item) => item.id.toString()}
+                scrollEnabled={false}
+              />
+            </>
+          )}
+
+          {/* Defenders */}
+          {startingPlayers.filter((p) =>
+            ["D", "DC", "DL", "DR"].includes(p.position),
+          ).length > 0 && (
+            <>
+              <Text style={styles.positionTitle}>Defenders</Text>
+              <FlatList
+                data={startingPlayers.filter((p) =>
+                  ["D", "DC", "DL", "DR"].includes(p.position),
+                )}
+                renderItem={renderPlayerItem}
+                keyExtractor={(item) => item.id.toString()}
+                scrollEnabled={false}
+              />
+            </>
+          )}
+
+          {/* Midfielders */}
+          {startingPlayers.filter((p) =>
+            ["M", "MC", "ML", "MR", "AM", "DM"].includes(p.position),
+          ).length > 0 && (
+            <>
+              <Text style={styles.positionTitle}>Midfielders</Text>
+              <FlatList
+                data={startingPlayers.filter((p) =>
+                  ["M", "MC", "ML", "MR", "AM", "DM"].includes(p.position),
+                )}
+                renderItem={renderPlayerItem}
+                keyExtractor={(item) => item.id.toString()}
+                scrollEnabled={false}
+              />
+            </>
+          )}
+
+          {/* Forwards */}
+          {startingPlayers.filter((p) => ["F", "FW", "ST"].includes(p.position))
+            .length > 0 && (
+            <>
+              <Text style={styles.positionTitle}>Forwards</Text>
+              <FlatList
+                data={startingPlayers.filter((p) =>
+                  ["F", "FW", "ST"].includes(p.position),
+                )}
+                renderItem={renderPlayerItem}
+                keyExtractor={(item) => item.id.toString()}
+                scrollEnabled={false}
+              />
+            </>
+          )}
         </View>
       </View>
-
-      <View style={styles.playerPositionsContainer}>
-        {data.filter((p) => p.position === "G").length > 0 && (
-          <>
-            <Text style={styles.positionTitle}>Goalkeepers</Text>
-            <FlatList
-              data={data.filter((p) => p.position === "G")}
-              renderItem={renderPlayerItem}
-              keyExtractor={(item) => item.id.toString()}
-              scrollEnabled={false}
-            />
-          </>
-        )}
-
-        {data.filter((p) => ["D", "DC", "DL", "DR"].includes(p.position))
-          .length > 0 && (
-          <>
-            <Text style={styles.positionTitle}>Defenders</Text>
-            <FlatList
-              data={data.filter((p) =>
-                ["D", "DC", "DL", "DR"].includes(p.position),
-              )}
-              renderItem={renderPlayerItem}
-              keyExtractor={(item) => item.id.toString()}
-              scrollEnabled={false}
-            />
-          </>
-        )}
-
-        {data.filter((p) =>
-          ["M", "MC", "ML", "MR", "AM", "DM"].includes(p.position),
-        ).length > 0 && (
-          <>
-            <Text style={styles.positionTitle}>Midfielders</Text>
-            <FlatList
-              data={data.filter((p) =>
-                ["M", "MC", "ML", "MR", "AM", "DM"].includes(p.position),
-              )}
-              renderItem={renderPlayerItem}
-              keyExtractor={(item) => item.id.toString()}
-              scrollEnabled={false}
-            />
-          </>
-        )}
-
-        {data.filter((p) => ["F", "FW", "ST"].includes(p.position)).length >
-          0 && (
-          <>
-            <Text style={styles.positionTitle}>Forwards</Text>
-            <FlatList
-              data={data.filter((p) => ["F", "FW", "ST"].includes(p.position))}
-              renderItem={renderPlayerItem}
-              keyExtractor={(item) => item.id.toString()}
-              scrollEnabled={false}
-            />
-          </>
-        )}
-      </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <ScrollView
@@ -524,6 +608,37 @@ const LiveMatchStatsPage = () => {
                   )}
                 </>
               )}
+
+              {/* Chat Section */}
+              <View style={styles.chatSection}>
+                <Text style={styles.chatHeader}>💬 Fan Chat</Text>
+                <FlatList
+                  data={chatMessages}
+                  inverted
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.chatBubble}>
+                      <Text style={styles.chatText}>{item.text}</Text>
+                    </View>
+                  )}
+                  style={{ maxHeight: 200 }}
+                />
+                <View style={styles.chatInputContainer}>
+                  <TextInput
+                    value={chatText}
+                    onChangeText={setChatText}
+                    placeholder="Type your message..."
+                    placeholderTextColor="#aaa"
+                    style={styles.chatInput}
+                  />
+                  <TouchableOpacity
+                    style={styles.chatSendButton}
+                    onPress={sendChatMessage}
+                  >
+                    <Text style={styles.chatSendText}>Send</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           )}
         </>
@@ -840,8 +955,12 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f5f5f5",
     alignItems: "center",
   },
+  substitutePlayer: {
+    opacity: 0.7,
+    backgroundColor: "#f9f9f9",
+  },
   playerInfo: {
-    width: 120,
+    width: 140,
     flexDirection: "row",
     alignItems: "center",
   },
@@ -896,12 +1015,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   statCell: {
-    width: "22%",
+    width: "23%",
     alignItems: "center",
-    marginBottom: 8,
-    backgroundColor: "#f9f9f9",
+    marginBottom: 5,
+    padding: 3,
+    backgroundColor: "#f5f5f5",
     borderRadius: 4,
-    paddingVertical: 4,
   },
   statLabel: {
     fontSize: 10,
@@ -909,7 +1028,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   statValue: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "bold",
     color: "#333",
   },
@@ -922,6 +1041,53 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#d32f2f",
     textAlign: "center",
+  },
+  chatSection: {
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: "#1a1f3c",
+    borderRadius: 12,
+  },
+  chatHeader: {
+    fontSize: 18,
+    color: "#fff",
+    marginBottom: 10,
+    fontWeight: "bold",
+  },
+  chatBubble: {
+    backgroundColor: "#2a2f4c",
+    padding: 10,
+    borderRadius: 15,
+    marginBottom: 8,
+    maxWidth: "90%",
+  },
+  chatText: {
+    color: "#fff",
+    fontSize: 14,
+  },
+  chatInputContainer: {
+    flexDirection: "row",
+    marginTop: 10,
+    alignItems: "center",
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: "#2a2f4c",
+    color: "#fff",
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    marginRight: 8,
+  },
+  chatSendButton: {
+    backgroundColor: "#ffcc00",
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  chatSendText: {
+    fontWeight: "bold",
+    color: "#000",
   },
 });
 
