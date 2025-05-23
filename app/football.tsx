@@ -35,6 +35,10 @@ const LiveMatchStatsPage = () => {
   const [error, setError] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatText, setChatText] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [pastMatches, setPastMatches] = useState([]);
 
   const SOFASCORE_API = "https://api.sofascore.com/api/v1";
 
@@ -58,6 +62,80 @@ const LiveMatchStatsPage = () => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const fetchPastMatches = async () => {
+    try {
+      // Fetch recent past matches (last 7 days)
+      const date = new Date();
+      date.setDate(date.getDate() - 7);
+      const formattedDate = date.toISOString().split("T")[0];
+
+      const response = await axios.get(
+        `${SOFASCORE_API}/sport/football/scheduled-events/${formattedDate}`,
+        {
+          headers: {
+            "User-Agent": "YourApp/1.0",
+          },
+        },
+      );
+      setPastMatches(response.data.events || []);
+    } catch (error) {
+      console.error("Error fetching past matches:", error);
+    }
+  };
+
+  const searchMatches = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      // Search in past matches first
+      const filtered = pastMatches.filter(
+        (match) =>
+          match.homeTeam.name
+            .toLowerCase()
+            .includes(searchQuery.toLowerCase()) ||
+          match.awayTeam.name.toLowerCase().includes(searchQuery.toLowerCase()),
+      );
+
+      setSearchResults(filtered);
+
+      // If not enough results, try API search
+      if (filtered.length < 5) {
+        const response = await axios.get(
+          `${SOFASCORE_API}/search/${searchQuery}`,
+          {
+            headers: {
+              "User-Agent": "YourApp/1.0",
+            },
+          },
+        );
+
+        // Filter for team results and get their matches
+        const teams = response.data?.teams || [];
+        if (teams.length > 0) {
+          const teamId = teams[0].id;
+          const teamMatches = await axios.get(
+            `${SOFASCORE_API}/team/${teamId}/events/last/0`,
+            {
+              headers: {
+                "User-Agent": "YourApp/1.0",
+              },
+            },
+          );
+          setSearchResults((prev) => [...prev, ...teamMatches.data.events]);
+        }
+      }
+    } catch (error) {
+      console.error("Search error:", error);
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -153,6 +231,21 @@ const LiveMatchStatsPage = () => {
     }
   }, [selectedFixture]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchMatches();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    fetchLiveMatches();
+    fetchPastMatches();
+    const interval = setInterval(fetchLiveMatches, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   const sendChatMessage = async () => {
     const trimmed = chatText.trim();
     if (!trimmed || !selectedFixture) return;
@@ -167,12 +260,6 @@ const LiveMatchStatsPage = () => {
       console.error("Chat send error:", err);
     }
   };
-
-  useEffect(() => {
-    fetchLiveMatches();
-    const interval = setInterval(fetchLiveMatches, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   const getRatingColor = (rating) => {
     if (rating >= 7.5) return "#4CAF50";
@@ -221,6 +308,62 @@ const LiveMatchStatsPage = () => {
               {item.homeScore.current || 0} - {item.awayScore.current || 0}
             </Text>
             <Text style={styles.matchTime}>{item.time.currentTime || 0}'</Text>
+          </View>
+
+          <View style={styles.team}>
+            <Image
+              source={{
+                uri: `https://api.sofascore.com/api/v1/team/${item.awayTeam.id}/image`,
+              }}
+              style={styles.teamLogo}
+            />
+            <Text style={styles.teamName} numberOfLines={1}>
+              {item.awayTeam.name}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderSearchResultCard = ({ item }) => {
+    return (
+      <TouchableOpacity
+        style={[
+          styles.matchCard,
+          selectedFixture?.id === item.id && styles.selectedMatchCard,
+        ]}
+        onPress={() => fetchFixtureDetails(item)}
+      >
+        <View style={styles.matchHeader}>
+          <Text style={styles.leagueName}>
+            {item.tournament?.name || "Match"}
+          </Text>
+          <Text style={styles.matchDate}>
+            {new Date(item.startTimestamp * 1000).toLocaleDateString()}
+          </Text>
+        </View>
+
+        <View style={styles.teamsContainer}>
+          <View style={styles.team}>
+            <Image
+              source={{
+                uri: `https://api.sofascore.com/api/v1/team/${item.homeTeam.id}/image`,
+              }}
+              style={styles.teamLogo}
+            />
+            <Text style={styles.teamName} numberOfLines={1}>
+              {item.homeTeam.name}
+            </Text>
+          </View>
+
+          <View style={styles.scoreContainer}>
+            <Text style={styles.scoreText}>
+              {item.homeScore?.current || 0} - {item.awayScore?.current || 0}
+            </Text>
+            <Text style={styles.matchStatusText}>
+              {item.status?.description || "Finished"}
+            </Text>
           </View>
 
           <View style={styles.team}>
@@ -345,7 +488,6 @@ const LiveMatchStatsPage = () => {
   };
 
   const renderPlayerSection = ({ title, data }) => {
-    // Filter out substitutes if you only want to show starters
     const startingPlayers = data.filter((player) => !player.substitute);
 
     return (
@@ -437,13 +579,51 @@ const LiveMatchStatsPage = () => {
     >
       <Text style={styles.header}>⚽ Live Football Matches</Text>
 
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search past matches by team name..."
+          placeholderTextColor="#999"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {isSearching && (
+          <ActivityIndicator style={styles.searchLoading} color="#3a7bd5" />
+        )}
+      </View>
+
       {error && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
 
-      {loading && !fixtures.length ? (
+      {searchQuery ? (
+        <>
+          <Text style={styles.sectionHeader}>
+            Search Results for "{searchQuery}"
+          </Text>
+          {isSearching ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#3a7bd5" />
+            </View>
+          ) : searchResults.length > 0 ? (
+            <FlatList
+              horizontal
+              data={searchResults}
+              renderItem={renderSearchResultCard}
+              keyExtractor={(item) => item.id.toString()}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.matchesList}
+            />
+          ) : (
+            <Text style={styles.noDataText}>No matches found</Text>
+          )}
+        </>
+      ) : loading && !fixtures.length ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3a7bd5" />
           <Text style={styles.loadingText}>Loading live matches...</Text>
@@ -454,6 +634,7 @@ const LiveMatchStatsPage = () => {
         </View>
       ) : (
         <>
+          <Text style={styles.sectionHeader}>Live Matches</Text>
           <FlatList
             horizontal
             data={fixtures}
@@ -462,186 +643,173 @@ const LiveMatchStatsPage = () => {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.matchesList}
           />
+        </>
+      )}
 
-          {selectedFixture && (
-            <View style={styles.detailsContainer}>
-              <View style={styles.matchSummary}>
-                <View style={styles.summaryTeams}>
-                  <View style={styles.summaryTeam}>
-                    <Image
-                      source={{
-                        uri: `https://api.sofascore.com/api/v1/team/${selectedFixture.homeTeam.id}/image`,
-                      }}
-                      style={styles.summaryLogo}
-                    />
-                    <Text style={styles.summaryTeamName}>
-                      {selectedFixture.homeTeam.name}
-                    </Text>
-                  </View>
-                  <Text style={styles.summaryScore}>
-                    {selectedFixture.homeScore.current || 0} -{" "}
-                    {selectedFixture.awayScore.current || 0}
-                  </Text>
-                  <View style={styles.summaryTeam}>
-                    <Image
-                      source={{
-                        uri: `https://api.sofascore.com/api/v1/team/${selectedFixture.awayTeam.id}/image`,
-                      }}
-                      style={styles.summaryLogo}
-                    />
-                    <Text style={styles.summaryTeamName}>
-                      {selectedFixture.awayTeam.name}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.matchStatus}>
-                  {selectedFixture.status.description} (
-                  {selectedFixture.time.currentTime}')
+      {selectedFixture && (
+        <View style={styles.detailsContainer}>
+          <View style={styles.matchSummary}>
+            <View style={styles.summaryTeams}>
+              <View style={styles.summaryTeam}>
+                <Image
+                  source={{
+                    uri: `https://api.sofascore.com/api/v1/team/${selectedFixture.homeTeam.id}/image`,
+                  }}
+                  style={styles.summaryLogo}
+                />
+                <Text style={styles.summaryTeamName}>
+                  {selectedFixture.homeTeam.name}
                 </Text>
               </View>
-
-              <View style={styles.tabsContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.tab,
-                    activeTab === "stats" && styles.activeTab,
-                  ]}
-                  onPress={() => setActiveTab("stats")}
-                >
-                  <Text
-                    style={[
-                      styles.tabText,
-                      activeTab === "stats" && styles.activeTabText,
-                    ]}
-                  >
-                    Stats
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.tab,
-                    activeTab === "events" && styles.activeTab,
-                  ]}
-                  onPress={() => setActiveTab("events")}
-                >
-                  <Text
-                    style={[
-                      styles.tabText,
-                      activeTab === "events" && styles.activeTabText,
-                    ]}
-                  >
-                    Events
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.tab,
-                    activeTab === "players" && styles.activeTab,
-                  ]}
-                  onPress={() => setActiveTab("players")}
-                >
-                  <Text
-                    style={[
-                      styles.tabText,
-                      activeTab === "players" && styles.activeTabText,
-                    ]}
-                  >
-                    Players
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {activeTab === "stats" && (
-                <>
-                  <Text style={styles.sectionHeader}>Match Statistics</Text>
-                  {playerStats.length > 0 ? (
-                    <FlatList
-                      data={playerStats}
-                      renderItem={renderStatItem}
-                      keyExtractor={(item, index) => index.toString()}
-                      scrollEnabled={false}
-                    />
-                  ) : (
-                    <Text style={styles.noDataText}>
-                      No statistics available for this match
-                    </Text>
-                  )}
-                </>
-              )}
-
-              {activeTab === "events" && (
-                <>
-                  <Text style={styles.sectionHeader}>Match Events</Text>
-                  {commentary.length > 0 ? (
-                    <FlatList
-                      data={commentary}
-                      renderItem={renderEventItem}
-                      keyExtractor={(item, index) => index.toString()}
-                      scrollEnabled={false}
-                    />
-                  ) : (
-                    <Text style={styles.noDataText}>
-                      No events available yet
-                    </Text>
-                  )}
-                </>
-              )}
-
-              {activeTab === "players" && (
-                <>
-                  <Text style={styles.sectionHeader}>Player Statistics</Text>
-                  {homePlayers.length > 0 || awayPlayers.length > 0 ? (
-                    <View style={styles.playersContainer}>
-                      {renderPlayerSection({
-                        title: selectedFixture.homeTeam.name,
-                        data: homePlayers,
-                      })}
-                      {renderPlayerSection({
-                        title: selectedFixture.awayTeam.name,
-                        data: awayPlayers,
-                      })}
-                    </View>
-                  ) : (
-                    <Text style={styles.noDataText}>
-                      Player data not available
-                    </Text>
-                  )}
-                </>
-              )}
-
-              {/* Chat Section */}
-              <View style={styles.chatSection}>
-                <Text style={styles.chatHeader}>💬 Fan Chat</Text>
-                <FlatList
-                  data={chatMessages}
-                  inverted
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <View style={styles.chatBubble}>
-                      <Text style={styles.chatText}>{item.text}</Text>
-                    </View>
-                  )}
-                  style={{ maxHeight: 200 }}
+              <Text style={styles.summaryScore}>
+                {selectedFixture.homeScore.current || 0} -{" "}
+                {selectedFixture.awayScore.current || 0}
+              </Text>
+              <View style={styles.summaryTeam}>
+                <Image
+                  source={{
+                    uri: `https://api.sofascore.com/api/v1/team/${selectedFixture.awayTeam.id}/image`,
+                  }}
+                  style={styles.summaryLogo}
                 />
-                <View style={styles.chatInputContainer}>
-                  <TextInput
-                    value={chatText}
-                    onChangeText={setChatText}
-                    placeholder="Type your message..."
-                    placeholderTextColor="#aaa"
-                    style={styles.chatInput}
-                  />
-                  <TouchableOpacity
-                    style={styles.chatSendButton}
-                    onPress={sendChatMessage}
-                  >
-                    <Text style={styles.chatSendText}>Send</Text>
-                  </TouchableOpacity>
-                </View>
+                <Text style={styles.summaryTeamName}>
+                  {selectedFixture.awayTeam.name}
+                </Text>
               </View>
             </View>
+            <Text style={styles.matchStatus}>
+              {selectedFixture.status.description} (
+              {selectedFixture.time.currentTime}')
+            </Text>
+          </View>
+
+          <View style={styles.tabsContainer}>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === "stats" && styles.activeTab]}
+              onPress={() => setActiveTab("stats")}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === "stats" && styles.activeTabText,
+                ]}
+              >
+                Stats
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === "events" && styles.activeTab]}
+              onPress={() => setActiveTab("events")}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === "events" && styles.activeTabText,
+                ]}
+              >
+                Events
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === "players" && styles.activeTab]}
+              onPress={() => setActiveTab("players")}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === "players" && styles.activeTabText,
+                ]}
+              >
+                Players
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {activeTab === "stats" && (
+            <>
+              <Text style={styles.sectionHeader}>Match Statistics</Text>
+              {playerStats.length > 0 ? (
+                <FlatList
+                  data={playerStats}
+                  renderItem={renderStatItem}
+                  keyExtractor={(item, index) => index.toString()}
+                  scrollEnabled={false}
+                />
+              ) : (
+                <Text style={styles.noDataText}>
+                  No statistics available for this match
+                </Text>
+              )}
+            </>
           )}
-        </>
+
+          {activeTab === "events" && (
+            <>
+              <Text style={styles.sectionHeader}>Match Events</Text>
+              {commentary.length > 0 ? (
+                <FlatList
+                  data={commentary}
+                  renderItem={renderEventItem}
+                  keyExtractor={(item, index) => index.toString()}
+                  scrollEnabled={false}
+                />
+              ) : (
+                <Text style={styles.noDataText}>No events available yet</Text>
+              )}
+            </>
+          )}
+
+          {activeTab === "players" && (
+            <>
+              <Text style={styles.sectionHeader}>Player Statistics</Text>
+              {homePlayers.length > 0 || awayPlayers.length > 0 ? (
+                <View style={styles.playersContainer}>
+                  {renderPlayerSection({
+                    title: selectedFixture.homeTeam.name,
+                    data: homePlayers,
+                  })}
+                  {renderPlayerSection({
+                    title: selectedFixture.awayTeam.name,
+                    data: awayPlayers,
+                  })}
+                </View>
+              ) : (
+                <Text style={styles.noDataText}>Player data not available</Text>
+              )}
+            </>
+          )}
+
+          {/* Chat Section */}
+          <View style={styles.chatSection}>
+            <Text style={styles.chatHeader}>💬 Fan Chat</Text>
+            <FlatList
+              data={chatMessages}
+              inverted
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <View style={styles.chatBubble}>
+                  <Text style={styles.chatText}>{item.text}</Text>
+                </View>
+              )}
+              style={{ maxHeight: 200 }}
+            />
+            <View style={styles.chatInputContainer}>
+              <TextInput
+                value={chatText}
+                onChangeText={setChatText}
+                placeholder="Type your message..."
+                placeholderTextColor="#aaa"
+                style={styles.chatInput}
+              />
+              <TouchableOpacity
+                style={styles.chatSendButton}
+                onPress={sendChatMessage}
+              >
+                <Text style={styles.chatSendText}>Send</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       )}
     </ScrollView>
   );
@@ -660,10 +828,32 @@ const styles = StyleSheet.create({
     color: "#333",
     textAlign: "center",
   },
+  searchContainer: {
+    marginBottom: 15,
+    position: "relative",
+  },
+  searchInput: {
+    backgroundColor: "#fff",
+    borderRadius: 25,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    fontSize: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  searchLoading: {
+    position: "absolute",
+    right: 15,
+    top: 12,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    padding: 20,
   },
   loadingText: {
     marginTop: 10,
@@ -713,6 +903,10 @@ const styles = StyleSheet.create({
     color: "#666",
     fontWeight: "500",
     flex: 1,
+  },
+  matchDate: {
+    fontSize: 11,
+    color: "#999",
   },
   liveBadge: {
     flexDirection: "row",
@@ -766,6 +960,11 @@ const styles = StyleSheet.create({
   matchTime: {
     fontSize: 12,
     color: "#666",
+  },
+  matchStatusText: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 4,
   },
   detailsContainer: {
     marginTop: 15,
